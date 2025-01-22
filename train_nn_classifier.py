@@ -262,7 +262,7 @@ def train(_dataset_path: str, _batch_size: int):
     save_best = K.callbacks.ModelCheckpoint(
         '/home/elena/ATTRITION/model.tf',
         monitor="val_loss",
-        verbose=0,
+        verbose=1,
         save_best_only=True,
         save_weights_only=False,
         mode="auto",

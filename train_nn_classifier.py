@@ -16,7 +16,7 @@ def dataframe_to_dataset(dataframe: pd.DataFrame):
     return ds
 
 
-def encode_numerical_feature(feature: K.Input, name: str, dataset: tf.data.Dataset):
+def encode_numerical_feature(feature: K.Input, name: str, dataset: tf.data.Dataset):  # numerical features like age, salary etc
     # Create a Normalization layer for our feature
     normalizer = K.layers.Normalization()
 
@@ -31,7 +31,7 @@ def encode_numerical_feature(feature: K.Input, name: str, dataset: tf.data.Datas
     return encoded_feature
 
 
-def encode_categorical_feature(feature: K.Input, name: str, dataset: tf.data.Dataset, is_string: bool):
+def encode_categorical_feature(feature: K.Input, name: str, dataset: tf.data.Dataset, is_string: bool):  # categorical features like sex, family status etc
     lookup_class = K.layers.StringLookup if is_string else K.layers.IntegerLookup
     lookup = lookup_class(output_mode="binary")
 
@@ -45,6 +45,10 @@ def encode_categorical_feature(feature: K.Input, name: str, dataset: tf.data.Dat
     # Turn the string input into integer indices
     encoded_feature = lookup(feature)
     return encoded_feature
+
+
+def DataFilter(x, y):  # remove samples with 0 days before salary increase (as an experiment)
+    return x['days_before_salary_increase'] > 0
 
 
 def create_dataset(_dataset_path: str, _batch_size: int):
@@ -63,6 +67,14 @@ def create_dataset(_dataset_path: str, _batch_size: int):
     train_ds = dataframe_to_dataset(train_dataframe)
     val_ds = dataframe_to_dataset(val_dataframe)
     val_ds_2 = dataframe_to_dataset(val_dataframe)
+    print("B", len(list(train_ds.as_numpy_iterator())))
+
+    train_ds = train_ds.filter(DataFilter)
+    val_ds = val_ds.filter(DataFilter)
+    val_ds_2 = val_ds.filter(DataFilter)
+
+
+    print("A", len(list(train_ds.as_numpy_iterator())))
 
     train_ds = train_ds.batch(_batch_size)
     val_ds = val_ds.batch(_batch_size)
@@ -70,7 +82,6 @@ def create_dataset(_dataset_path: str, _batch_size: int):
 
 
 def prepare_all_features(_train_ds: tf.data.Dataset):
-
     # Categorical features encoded as integers
     gender = K.Input(shape=(1,), name="gender", dtype="int64")
     department = K.Input(shape=(1,), name="department", dtype="int64")
@@ -232,7 +243,7 @@ def calculate_feature_importance(_model: K.Model, _train_dataframe: pd.DataFrame
     permutation_feature_importance(_model, _val_ds_batched, _val_ds)
 
 
-def create_model(_all_features, _all_inputs):
+def create_model(_all_features: tf.Tensor, _all_inputs: list):
     n_neurons = 32
     x = K.layers.Dense(n_neurons, activation="relu")(_all_features)
     x = K.layers.Dropout(0.5)(x)
@@ -241,7 +252,7 @@ def create_model(_all_features, _all_inputs):
 
 
 def train(_dataset_path: str, _batch_size: int):
-    train_ds, val_ds, val_ds_2, train_dataframe, _  = create_dataset(_dataset_path, _batch_size)
+    train_ds, val_ds, val_ds_2, train_dataframe, _ = create_dataset(_dataset_path, _batch_size)
     all_features, all_inputs = prepare_all_features(train_ds)
     model = create_model(all_features, all_inputs)
 
@@ -260,7 +271,7 @@ def train(_dataset_path: str, _batch_size: int):
         embeddings_metadata=None,
     )
     save_best = K.callbacks.ModelCheckpoint(
-        '/home/elena/ATTRITION/model.tf',
+        'best_keras_model',
         monitor="val_loss",
         verbose=1,
         save_best_only=True,
@@ -270,7 +281,7 @@ def train(_dataset_path: str, _batch_size: int):
         initial_value_threshold=None,
     )
     # fit the keras model
-    model.fit(train_ds, epochs=120, batch_size=_batch_size, validation_data=val_ds, callbacks=[tboard, save_best])
+    model.fit(train_ds, epochs=50, batch_size=_batch_size, validation_data=val_ds, callbacks=[tboard, save_best])
 
     print(model.summary())
     print('Evaluation...')

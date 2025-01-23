@@ -1,27 +1,32 @@
 from auton_survival import estimators, datasets
-from auton_survival.preprocessing import Preprocessor
+from auton_survival.preprocessing import Preprocessor, Scaler
+from auton_survival.metrics import survival_regression_metric
 from pandas import read_csv
 
 
 def fit_survival_machine(features, outcomes):
     model = estimators.SurvivalModel(model='dsm')
-    print(model)
+    # Preprocessor does both imputing and scaling of data:
     features = Preprocessor().fit_transform(features,
                                             cat_feats=['department', 'nationality', 'gender', 'family_status'],
                                             num_feats=[
-                    "seniority",
                     "age",
                     "days_before_salary_increase",
                     "salary_increase",
                     "overtime",
                     "salary_6m_average",
                     "salary_cur"])
-    print(features)
-    print(outcomes.event)
 
+    print("Fitting...")
     model.fit(features, outcomes)
-    predictions = model.predict_risk(features, times=[8, 12, 16])
+    print("Prediction...")
+    predictions = model.predict_survival(features, times=[2000])
     print(predictions)
+
+    # metrics = ['brs', 'ibs', 'auc', 'ctd']
+    # score = survival_regression_metric(metric='brs', outcomes,
+    #                                    outcomes, predictions,
+    #                                    times=[20])
 
 
 def prepare_dataset(_data_path: str):

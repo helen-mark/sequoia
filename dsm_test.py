@@ -5,6 +5,7 @@
 """
 
 import auton_survival
+import pandas as pd
 from auton_survival import estimators
 from auton_survival.preprocessing import Preprocessor
 from pandas import read_csv
@@ -12,7 +13,7 @@ from pandas import read_csv
 from utils.custom_metric import calc_metric
 
 
-def preprocess(_features):
+def preprocess(_features: pd.DataFrame):
     return Preprocessor().fit_transform(_features,
                                             cat_feats=['department', 'nationality', 'gender', 'family_status'],
                                             num_feats=[
@@ -26,7 +27,7 @@ def preprocess(_features):
                                             )
 
 
-def fit_survival_machine(_features, _outcomes):
+def fit_survival_machine(_features: pd.DataFrame, _outcomes: pd.DataFrame):
     model = estimators.SurvivalModel(model='dsm')
     # Preprocessor does both imputing and scaling of data:
     _features = preprocess(_features)
@@ -43,7 +44,7 @@ def fit_survival_machine(_features, _outcomes):
 
 
 
-def test_survival_machine(_model: auton_survival.models.dsm.DeepSurvivalMachines, _dataset):
+def test_survival_machine(_model: auton_survival.models.dsm.DeepSurvivalMachines, _dataset: pd.DataFrame):
     _dataset = _dataset.transpose()
     feats = _dataset[:-2].transpose()
     outs = _dataset[-2:].transpose()

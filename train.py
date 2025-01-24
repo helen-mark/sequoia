@@ -12,10 +12,9 @@ import pandas as pd
 import xgboost as xgb
 from pandas import read_csv
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, precision_score, recall_score, f1_score
 from sklearn.model_selection import train_test_split
-from sklearn import tree
 
 
 def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _num_iters):
@@ -96,8 +95,7 @@ def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _num_iters):
 
 
 def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _num_iters):
-    model = RandomForestClassifier(n_estimators=10, max_features='sqrt')
-    thrs = 0.5
+    model = RandomForestClassifier(n_estimators=100, max_features='sqrt')
     best_precision = 0.
     best_model = model
 
@@ -126,6 +124,18 @@ def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _num_iters):
     feature_importance = best_model.feature_importances_
     feature_importance_df = pd.DataFrame({'Feature': _x_train.columns, 'Importance': feature_importance})
     print(feature_importance_df)
+
+    # dataset = read_csv('data/october_works.csv', delimiter=',')
+    # target_idx = -1  # index of "works/left" column
+    #
+    # dataset = dataset.transpose()
+    # trg = dataset[target_idx:].transpose()
+    # trn = dataset[:target_idx].transpose()
+    #
+    # pred = best_model.predict(trn)
+    # recall = recall_score(trg, pred)
+    # precision = precision_score(trg, pred)
+    # print("Recall:", recall, "Precision:", precision)
 
     return best_model
 
@@ -185,8 +195,10 @@ def train(_x_train, _y_train, _x_test, _y_test, _model_name, _num_iters, _maximi
     #           # LogisticRegression(),
     #           ]
 
+
 def normalize(_data: pd.DataFrame):
     return _data.apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0)
+
 
 def prepare_dataset(_dataset_path: str, _test_split: float, _normalize: bool):
     dataset = read_csv(_dataset_path, delimiter=',')
@@ -261,7 +273,7 @@ if __name__ == '__main__':
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision'  # metric to maximize
     }
-    dataset_src = 'data/dataset-2-small.csv'
+    dataset_src = 'data/october_works.csv'
 
     # Load the dataset from file and split it to train/test:
     x_train, x_test, y_train, y_test = prepare_dataset(dataset_src, config['test_split'], config['normalize'])

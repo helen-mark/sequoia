@@ -57,7 +57,7 @@ required_sheets:
         name: 'Общий стаж работы'
       f15:
         name: 'Кол-во мест работодателей за карьеру'
-        name_out: 'n_empoyers'
+        name_out: 'n_employers'
         kind: 'common'
       f16:
         name: 'Категория вредности'

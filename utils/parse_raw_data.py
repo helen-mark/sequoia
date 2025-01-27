@@ -85,9 +85,65 @@ def fill_snapshot_specific():
 
 
 def fill_common_features(_f_name, _dataset, _col):
-
-    _dataset.insert(len(_dataset.columns), _f_name, _col)
+    reform_col = []
+    for c in _col:
+        f = lookup(_f_name, c)
+        reform_col.append(f)
+    _dataset.insert(len(_dataset.columns), _f_name, reform_col)
     pass
+
+
+def lookup(f_name, key):
+    if f_name == 'n':
+        return int(key)
+    elif f_name == 'gender':
+        if key in ['ж', 'Ж', 'жен', 'Жен', 'женский', 'Женский']:
+            return 1
+        elif key in ['м', 'М', 'муж', 'Муж', 'мужской', 'Мужской']:
+            return 0
+        else:
+            raise ValueError(f'Invalid gender format: {key}')
+    elif f_name == 'citizenship':
+        if key in ['Россия', 'россия', 'Российское', 'российское']:
+            return 0
+        elif key in ['иное', 'НЕ РФ', 'НЕ Рф']:
+            return 1
+        else:
+            raise ValueError(f'Invalid citizenship format: {key}')
+    elif f_name == 'education':
+        if key in ['среднее']:
+            return 0
+        elif key in ['высшее']:
+            return 1
+        elif key in ['среднее специальное']:
+            return 2
+        elif key in ['неоконченное высшее']:
+            return 3
+        else:
+            raise ValueError(f'Invalid education format: {key}')
+
+    elif f_name == 'family_status':
+        if key in ['женат', 'замужем', 'в браке']:
+            return 0
+        elif key in ['не женат', 'не замужем', 'не в браке']:
+            return 1
+        else:
+            raise ValueError(f'Invalid family status format: {key}')
+    elif f_name == 'children':
+        return int(key)
+    elif f_name == 'to_work_travel_time':
+        return float(key)
+    elif f_name == 'department':
+        if key in ['логистика']:
+            return 1
+        elif key in ['основное производство', 'основной']:
+            return 0
+        else:
+            raise ValueError(f'Invalid department format: {key}')
+    elif f_name == 'n_employers':
+        return int(key)
+    elif f_name == 'occupational_hazards':
+        return int(key)
 
 
 def check_and_parse(_data_config, _dataset_config):
@@ -112,6 +168,7 @@ def check_and_parse(_data_config, _dataset_config):
     for n, row in input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
         if row.name in common_features:
             new_col = row.values
+            print(new_col)
             fill_common_features(common_features[row.name], dataset, new_col)
         else:
             pass

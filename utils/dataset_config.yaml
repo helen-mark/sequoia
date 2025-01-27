@@ -1,0 +1,30 @@
+snapshot_features:
+  common:
+    - gender
+    - citizenship
+    - education
+    - family_status
+    - children
+    - to_work_travel_time
+    - department
+    - n_employers
+    - occupational_hazards
+  specific:
+    - age
+    - company_seniority
+    - overall_experience
+    - license_expiration
+    - salary_6m_average
+    - salary_current
+    - time_since_salary_increase
+    - income_6m_average
+    - income_current
+    - time_since_last_promotion
+    - absenteeism_6m_average
+    - absenteeism_2m_average
+    - vacation_days  # except last month?
+    - leader_left_3m
+    - has_meal
+    - has_insurance
+    - penalties_2m
+    - penalties_6m

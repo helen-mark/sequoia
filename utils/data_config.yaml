@@ -1,0 +1,115 @@
+data_location:
+  data_path: '/home/elena/ATTRITION/sequoia/data/'
+  file_name: 'data.xlsx'  # check file extension
+required_sheets:
+  basic:
+    name: 'Основные данные'
+    features:
+      f1:
+        name: '№'
+        type: 'int'
+      f2:
+        name: 'ФИО/код сотрудника'  # check uniqueness
+        type: 'str'
+      f3:
+        name: 'Пол'
+        type: 'str'
+        values: ['ж', 'Ж', 'жен', 'Жен', 'женский', 'Женский', 'м', 'М', 'муж', 'Муж', 'мужской', 'Мужской']
+      f4:
+        name: 'Возраст'
+        type: 'int'
+        interval: [18, 100]
+      f5:
+        name: 'Гражданство'
+      f6:
+        name: 'Образование'
+      f7:
+        name: 'Семейное положение'
+      f8:
+        name: 'Кол-во детей'
+      f9:
+        name: 'Адрес работы'
+      f10:
+        name: 'Департамент'
+      f11:
+        name: 'Дата найма'
+      f12:
+        name: 'Дата увольнения'
+      f13:
+        name: 'Причина увольнения'
+      f14:
+        name: 'Общий стаж работы'
+      f15:
+        name: 'Кол-во мест работодателей за карьеру'
+      f16:
+        name: 'Категория вредности'
+      f17:
+        name: 'Дата истечения разрешения на работу'
+  salary:
+    name: 'Оплата труда'
+    features:
+      f1:
+        name: '№'
+        type: 'int'
+      f2:
+        name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+        type: 'str'
+      f3:
+        name: 'Январь'
+        type: 'str'
+      f4:
+        name: 'Февраль'
+      f5:
+        name: 'Март'
+      f6:
+        name: 'Апрель'
+      f7:
+        name: 'Май'
+      f8:
+        name: 'Июнь'
+      f9:
+        name: 'Июль'
+      f10:
+        name: 'Август'
+      f11:
+        name: 'Сентябрь'
+      f12:
+        name: 'Октябрь'
+      f13:
+        name: 'Ноябрь'
+      f14:
+        name: 'Декабрь'
+  income:
+    name: 'Общий доход'
+    features:
+      f1:
+        name: '№'
+        type: 'int'
+      f2:
+        name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+        type: 'str'
+      f3:
+        name: 'Январь'
+        type: 'str'
+      f4:
+        name: 'Февраль'
+      f5:
+        name: 'Март'
+      f6:
+        name: 'Апрель'
+      f7:
+        name: 'Май'
+      f8:
+        name: 'Июнь'
+      f9:
+        name: 'Июль'
+      f10:
+        name: 'Август'
+      f11:
+        name: 'Сентябрь'
+      f12:
+        name: 'Октябрь'
+      f13:
+        name: 'Ноябрь'
+      f14:
+        name: 'Декабрь'

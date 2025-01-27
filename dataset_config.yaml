@@ -1,5 +1,6 @@
 snapshot_features:
   common:
+    - n
     - gender
     - citizenship
     - education

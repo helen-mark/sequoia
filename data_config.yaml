@@ -7,30 +7,46 @@ required_sheets:
     features:
       f1:
         name: '№'
+        name_out: 'n'
         type: 'int'
+        kind: 'common'
       f2:
         name: 'ФИО/код сотрудника'  # check uniqueness
+        name_out: 'code'
         type: 'str'
+        kind: 'common'
       f3:
         name: 'Пол'
+        name_out: 'gender'
         type: 'str'
         values: ['ж', 'Ж', 'жен', 'Жен', 'женский', 'Женский', 'м', 'М', 'муж', 'Муж', 'мужской', 'Мужской']
+        kind: 'common'
       f4:
         name: 'Возраст'
         type: 'int'
         interval: [18, 100]
       f5:
         name: 'Гражданство'
+        name_out: 'citizenship'
+        kind: 'common'
       f6:
         name: 'Образование'
+        name_out: 'education'
+        kind: 'common'
       f7:
         name: 'Семейное положение'
+        name_out: 'family_status'
+        kind: 'common'
       f8:
         name: 'Кол-во детей'
+        name_out: 'children'
+        kind: 'common'
       f9:
         name: 'Адрес работы'
       f10:
         name: 'Департамент'
+        name_out: 'department'
+        kind: 'common'
       f11:
         name: 'Дата найма'
       f12:
@@ -41,8 +57,12 @@ required_sheets:
         name: 'Общий стаж работы'
       f15:
         name: 'Кол-во мест работодателей за карьеру'
+        name_out: 'n_empoyers'
+        kind: 'common'
       f16:
         name: 'Категория вредности'
+        name_out: 'occupational_hazards'
+        kind: 'common'
       f17:
         name: 'Дата истечения разрешения на работу'
   salary:

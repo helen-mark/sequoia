@@ -1,6 +1,9 @@
 data_location:
-  data_path: '/home/elena/ATTRITION/sequoia/data/'
+  data_path: 'data/'
   file_name: 'data.xlsx'  # check file extension
+basic:
+  snapshot_duration: 6  # months
+  date_format: '%Y.%m.%d'
 required_sheets:
   basic:
     name: 'Основные данные'

@@ -1,8 +1,11 @@
-from pandas import read_excel
-import pandas as pd
 import os
-import yaml
 
+from datetime import datetime, date
+import pandas as pd
+import yaml
+from pandas import read_excel
+
+from path_setup import SequoiaPath
 
 def check_required_fields():
     pass
@@ -24,7 +27,7 @@ def calc_license_expiration():
     pass
 
 
-def calc_salary_6m_average():
+def calc_salary_average(_period_months: int):
     pass
 
 
@@ -36,7 +39,7 @@ def calc_time_since_salary_increase():
     pass
 
 
-def calc_income_6m():
+def calc_income(_period_months: int):
     pass
 
 
@@ -48,11 +51,7 @@ def calc_time_since_promotion():
     pass
 
 
-def calc_absenteeism_6m():
-    pass
-
-
-def calc_absenteeism_2m():
+def calc_absenteeism(_period_months: int):
     pass
 
 
@@ -72,15 +71,30 @@ def check_has_insurance():
     pass
 
 
-def calc_penalties_2m():
+def calc_penalties(_period_months: int):
     pass
 
 
-def calc_penalties_6m():
-    pass
 
-
-def fill_snapshot_specific():
+def fill_snapshot_specific(_snapshot_start: datetime.time):
+    # - age
+    # - company_seniority
+    # - overall_experience
+    # - license_expiration
+    # - salary_6m_average
+    # - salary_current
+    # - time_since_salary_increase
+    # - income_6m_average
+    # - income_current
+    # - time_since_last_promotion
+    # - absenteeism_6m_average
+    # - absenteeism_2m_average
+    # - vacation_days  # except last month?
+    # - leader_left_3m
+    # - has_meal
+    # - has_insurance
+    # - penalties_2m
+    # - penalties_6m
     pass
 
 
@@ -144,6 +158,8 @@ def lookup(f_name, key):
         return int(key)
     elif f_name == 'occupational_hazards':
         return int(key)
+    else:
+        raise ValueError(f'Invalid feature name passed to lookup(): {f_name}')
 
 
 def check_and_parse(_data_config, _dataset_config):
@@ -153,48 +169,31 @@ def check_and_parse(_data_config, _dataset_config):
     input_df = read_excel(os.path.join(data_dir, filename), sheet_name='Основные данные')
     main_features = _data_config['required_sheets']['basic']['features']
     common_features = {}
+    specific_features = []
 
     # collect feature input names which are common for all snapshots:
     for f_name in main_features.keys():
         f = main_features[f_name]
         if 'kind' in f.keys() and f['kind'] == 'common':
             common_features[f['name']] = f['name_out']
+        else:
+            specific_features.append(f['name'])
+
     print(f'common: {common_features}\n')
 
     dataset = pd.DataFrame()  # columns=[dataset_config['snapshot_features']["common"] + dataset_config['snapshot_features']["specific"]])
 
     print(dataset)
     new_col = []
-    for n, row in input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
-        if row.name in common_features:
-            new_col = row.values
+    for n, col in input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
+        if col.name in common_features:
+            new_col = col.values
             print(new_col)
-            fill_common_features(common_features[row.name], dataset, new_col)
-        else:
-            pass
-            # - age
-            # - company_seniority
-            # - overall_experience
-            # - license_expiration
-            # - salary_6m_average
-            # - salary_current
-            # - time_since_salary_increase
-            # - income_6m_average
-            # - income_current
-            # - time_since_last_promotion
-            # - absenteeism_6m_average
-            # - absenteeism_2m_average
-            # - vacation_days  # except last month?
-            # - leader_left_3m
-            # - has_meal
-            # - has_insurance
-            # - penalties_2m
-            # - penalties_6m
+            fill_common_features(common_features[col.name], dataset, new_col)
 
+    fill_snapshot_specific(specific_features)
 
     print('result:', dataset)
-
-    pass
 
 
 if __name__ == '__main__':
@@ -208,5 +207,8 @@ if __name__ == '__main__':
     with open(dataset_config_path) as stream:
         dataset_config = yaml.load(stream, yaml.Loader)
         # print(dataset_config['snapshot_features']["common"])
+    dt1 = datetime.now()
+    dt2 = datetime(2023, 1, 25)
+    print(dt1.timestamp() - dt2.timestamp())
 
     check_and_parse(data_config, dataset_config)

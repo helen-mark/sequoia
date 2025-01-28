@@ -14,7 +14,7 @@ required_sheets:
         type: 'int'
         kind: 'common'
       f2:
-        name: 'ФИО/код сотрудника'  # check uniqueness
+        name: 'ФИО / код сотрудника'  # check uniqueness
         name_out: 'code'
         type: 'str'
         kind: 'common'

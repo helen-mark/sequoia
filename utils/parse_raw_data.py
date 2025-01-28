@@ -76,7 +76,11 @@ def calc_penalties(_period_months: int):
 
 
 
-def fill_snapshot_specific(_snapshot_start: datetime.time):
+def fill_snapshot_specific(_specific_features: [], _input_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _snapshot_dur: int):
+    for f_name in _specific_features:
+        if f_name == 'Возраст':
+            pass
+            # age = _input_df[]
     # - age
     # - company_seniority
     # - overall_experience
@@ -99,16 +103,17 @@ def fill_snapshot_specific(_snapshot_start: datetime.time):
 
 
 def fill_common_features(_f_name, _dataset, _col):
+    if _f_name == 'n':
+        return
     reform_col = []
     for c in _col:
         f = lookup(_f_name, c)
         reform_col.append(f)
     _dataset.insert(len(_dataset.columns), _f_name, reform_col)
-    pass
 
 
 def lookup(f_name, key):
-    if f_name == 'n':
+    if f_name == 'code':
         return int(key)
     elif f_name == 'gender':
         if key in ['ж', 'Ж', 'жен', 'Жен', 'женский', 'Женский']:
@@ -135,7 +140,6 @@ def lookup(f_name, key):
             return 3
         else:
             raise ValueError(f'Invalid education format: {key}')
-
     elif f_name == 'family_status':
         if key in ['женат', 'замужем', 'в браке']:
             return 0
@@ -144,6 +148,8 @@ def lookup(f_name, key):
         else:
             raise ValueError(f'Invalid family status format: {key}')
     elif f_name == 'children':
+        #if not key.isdigit():
+        #    raise TypeError(f'Unexpected n_children value: {key}')
         return int(key)
     elif f_name == 'to_work_travel_time':
         return float(key)
@@ -155,18 +161,36 @@ def lookup(f_name, key):
         else:
             raise ValueError(f'Invalid department format: {key}')
     elif f_name == 'n_employers':
+        #if not key.isdigit():
+        #    raise TypeError(f'Unexpected n_employers value: {key}')
         return int(key)
     elif f_name == 'occupational_hazards':
+        #if not key.isdigit():
+        #    raise TypeError(f'Unexpected hazards value: {key}')
         return int(key)
     else:
         raise ValueError(f'Invalid feature name passed to lookup(): {f_name}')
+
+
+def collect_main_data(_common_features: {}, _input_df: pd.DataFrame, _data_config: dict):
+    dataset = pd.DataFrame()  # columns=[dataset_config['snapshot_features']["common"] + dataset_config['snapshot_features']["specific"]])
+
+    new_col = []
+    for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
+        if col.name in _common_features:
+            new_col = col.values
+            fill_common_features(_common_features[col.name], dataset, new_col)
+
+    print('result:', dataset)
+    return dataset
 
 
 def check_and_parse(_data_config, _dataset_config):
     data_dir = _data_config['data_location']['data_path']
     filename = _data_config['data_location']['file_name']
 
-    input_df = read_excel(os.path.join(data_dir, filename), sheet_name='Основные данные')
+    input_df_common = read_excel(os.path.join(data_dir, filename), sheet_name='Основные данные')
+    input_df_salary = read_excel(os.path.join(data_dir, filename), sheet_name='Оплата труда')
     main_features = _data_config['required_sheets']['basic']['features']
     common_features = {}
     specific_features = []
@@ -179,21 +203,14 @@ def check_and_parse(_data_config, _dataset_config):
         else:
             specific_features.append(f['name'])
 
-    print(f'common: {common_features}\n')
 
-    dataset = pd.DataFrame()  # columns=[dataset_config['snapshot_features']["common"] + dataset_config['snapshot_features']["specific"]])
+    dt1 = datetime.now()
+    dt2 = datetime(2023, 1, 25)
+    print(dt1.timestamp() - dt2.timestamp())
 
-    print(dataset)
-    new_col = []
-    for n, col in input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
-        if col.name in common_features:
-            new_col = col.values
-            print(new_col)
-            fill_common_features(common_features[col.name], dataset, new_col)
+    dataset = collect_main_data(common_features, input_df_common, _data_config)
+    dataset = fill_snapshot_specific(specific_features, input_df_common, dataset, dt2, 6)
 
-    fill_snapshot_specific(specific_features)
-
-    print('result:', dataset)
 
 
 if __name__ == '__main__':
@@ -201,14 +218,9 @@ if __name__ == '__main__':
     dataset_config_path = '../dataset_config.yaml'
     with open(setup_path) as stream:
         data_config = yaml.load(stream, yaml.Loader)
-        # for key, val in data_config.items():
-        #     print(val)
 
     with open(dataset_config_path) as stream:
         dataset_config = yaml.load(stream, yaml.Loader)
         # print(dataset_config['snapshot_features']["common"])
-    dt1 = datetime.now()
-    dt2 = datetime(2023, 1, 25)
-    print(dt1.timestamp() - dt2.timestamp())
 
     check_and_parse(data_config, dataset_config)

@@ -3,6 +3,7 @@ from utils.parse_raw_data import check_and_parse
 from datetime import datetime
 import yaml
 
+
 def main():
     SequoiaPath()
     setup_path = 'data_config.yaml'
@@ -18,8 +19,6 @@ def main():
     dt1 = datetime.now()
     dt2 = datetime(2023, 1, 25)
     print(dt1.timestamp() - dt2.timestamp())
-
-    check_and_parse(data_config, dataset_config)
 
     check_and_parse(data_config, dataset_config)
 

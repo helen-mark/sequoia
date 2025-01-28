@@ -16,9 +16,6 @@ def main():
     with open(dataset_config_path) as stream:
         dataset_config = yaml.load(stream, yaml.Loader)
         # print(dataset_config['snapshot_features']["common"])
-    dt1 = datetime.now()
-    dt2 = datetime(2023, 1, 25)
-    print(dt1.timestamp() - dt2.timestamp())
 
     check_and_parse(data_config, dataset_config)
 

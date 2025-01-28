@@ -2,6 +2,7 @@ import os
 
 from datetime import datetime, date
 import pandas as pd
+import numpy as np
 import yaml
 from pandas import read_excel
 
@@ -75,8 +76,28 @@ def calc_penalties(_period_months: int):
     pass
 
 
+def calc_salary_increase_dates(_salary_per_month: pd.DataFrame, _personal_code: int):
+    dates = []
+    assert not _salary_per_month.empty
+    sample = _salary_per_month.loc[_salary_per_month['ФИО / код сотрудника'] == _personal_code]
+    print(sample)
+
+    months = ['Январь',	'Февраль',	'Март',	'Апрель',	'Май',	'Июнь',	'Июль',	'Август',	'Сентябрь',	'Октябрь',	'Ноябрь',	'Декабрь']
+
+    salary_prev = sample['Январь'].item()
+    for name, val in sample.items():
+        if name in months and val.item() > salary_prev:
+            salary_prev = val.item()
+            dates.append(name)
+    print(dates)
+
+
+def collect_salary_pre_month(_input_df: pd.DataFrame, _code: int):
+    t = _input_df[_code]
+
 
 def fill_snapshot_specific(_specific_features: [], _input_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _snapshot_dur: int):
+    calc_salary_increase_dates(_input_df.drop(columns='№'), 2)
     for f_name in _specific_features:
         if f_name == 'Возраст':
             pass
@@ -208,8 +229,8 @@ def check_and_parse(_data_config, _dataset_config):
     dt2 = datetime(2023, 1, 25)
     print(dt1.timestamp() - dt2.timestamp())
 
-    dataset = collect_main_data(common_features, input_df_common, _data_config)
-    dataset = fill_snapshot_specific(specific_features, input_df_common, dataset, dt2, 6)
+    main_dataset = collect_main_data(common_features, input_df_common, _data_config)
+    dataset = fill_snapshot_specific(specific_features, input_df_salary, main_dataset, dt2, 6)
 
 
 

@@ -28,24 +28,45 @@ def calc_license_expiration():
     pass
 
 
-def calc_salary_average(_period_months: int):
-    pass
+def calc_salary_average(_salary_per_month: pd.DataFrame, _period_months: int, _snapshot_start: datetime.date):
+    assert not _salary_per_month.empty
+    assert _period_months > 0
+
+    _salary_per_month = _salary_per_month[_salary_per_month.columns[::-1]]  # this operation reverses order of columns
+    print('average salary: reversed sample = ', _salary_per_month)
+
+    salary_sum = 0.
+    count = 0
+    for date, val in _salary_per_month.items():  # same order of columns like in xlsx table
+        if date <= _snapshot_start:
+            print('Take salary at', date)
+            salary_sum += val
+            count += 1
+            if count == _period_months:
+                break
+
+    salary_avg = salary_sum / _period_months
+    print("Average salary:", salary_avg)
+    return salary_avg
 
 
-def calc_salary_current():
-    pass
+def calc_salary_current(_salary_per_month: pd.DataFrame, _snapshot_start: datetime.date):
+    assert len(_salary_per_month) > 0
+    _salary_per_month = _salary_per_month[_salary_per_month.columns[::-1]]  # this operation reverses order of columns
+    print('average salary: reversed sample = ', _salary_per_month)
+
+    for date, val in _salary_per_month.items():  # same order of columns like in xlsx table
+        if date <= _snapshot_start:
+            print('Take salary at', date)
+            return val
 
 
-def calc_time_since_salary_increase():
-    pass
 
-
-def calc_income(_period_months: int):
-    pass
-
-
-def calc_income_cur():
-    pass
+def calc_time_since_salary_increase(_salary_increase_dates: list, _snapshot_start: datetime.date):
+    _salary_increase_dates.reverse()
+    for date in _salary_increase_dates:
+        if date < _snapshot_start:
+            return _snapshot_start - date
 
 
 def calc_time_since_promotion():
@@ -76,32 +97,46 @@ def calc_penalties(_period_months: int):
     pass
 
 
-def calc_salary_increase_dates(_salary_per_month: pd.DataFrame, _personal_code: int):
+def calc_salary_increase_dates(_salary_per_month: pd.DataFrame):
     dates = []
     assert not _salary_per_month.empty
-    sample = _salary_per_month.loc[_salary_per_month['ФИО / код сотрудника'] == _personal_code]
-    print(sample)
 
-    months = ['Январь',	'Февраль',	'Март',	'Апрель',	'Май',	'Июнь',	'Июль',	'Август',	'Сентябрь',	'Октябрь',	'Ноябрь',	'Декабрь']
-
-    salary_prev = sample['Январь'].item()
-    for name, val in sample.items():
-        if name in months and val.item() > salary_prev:
+    # months = ['Январь',	'Февраль',	'Март',	'Апрель',	'Май',	'Июнь',	'Июль',	'Август',	'Сентябрь',	'Октябрь',	'Ноябрь',	'Декабрь']
+    salary_prev = 0
+    for name, val in _salary_per_month.items():  # same order of columns like in xlsx table
+        if val.item() > salary_prev:  # consider employers' first salary as increase too
             salary_prev = val.item()
             dates.append(name)
-    print(dates)
+    return dates
 
 
-def collect_salary_pre_month(_input_df: pd.DataFrame, _code: int):
-    t = _input_df[_code]
+def fill_salary_per_date(_input_df: pd.DataFrame):
+    year = 2024
+    new_columns = ['code']
+    for i in range(1, 13):
+        new_columns.append(date(year, i, 1))
+    print((new_columns[3] - new_columns[2]).days)
+    _input_df.columns = new_columns
+    return _input_df
 
 
-def fill_snapshot_specific(_specific_features: [], _input_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _snapshot_dur: int):
-    calc_salary_increase_dates(_input_df.drop(columns='№'), 2)
-    for f_name in _specific_features:
-        if f_name == 'Возраст':
-            pass
-            # age = _input_df[]
+def fill_snapshot_specific(_specific_features: list, _input_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _snapshot_dur: int):
+    _input_df = _input_df.drop(columns='№')
+    _input_df = fill_salary_per_date(_input_df)
+
+    for code in _dataset['code']:
+        print('\npersonal code:', code)
+        sample = _input_df.loc[_input_df['code'] == code]
+        sample = sample.drop(columns='code')  # leave ony columns with salary values
+        print(sample)
+
+        salary_avg_6m = calc_salary_average(sample, 6, _snapshot_start)
+        print('after:', sample)
+        dates = calc_salary_increase_dates(sample)
+        time_since_salary_increase = calc_time_since_salary_increase(dates, _snapshot_start)
+        print("Time since salary increase:", time_since_salary_increase)
+        cur_salary = calc_salary_current(sample, _snapshot_start)
+
     # - age
     # - company_seniority
     # - overall_experience
@@ -120,7 +155,6 @@ def fill_snapshot_specific(_specific_features: [], _input_df: pd.DataFrame, _dat
     # - has_insurance
     # - penalties_2m
     # - penalties_6m
-    pass
 
 
 def fill_common_features(_f_name, _dataset, _col):
@@ -212,6 +246,8 @@ def check_and_parse(_data_config, _dataset_config):
 
     input_df_common = read_excel(os.path.join(data_dir, filename), sheet_name='Основные данные')
     input_df_salary = read_excel(os.path.join(data_dir, filename), sheet_name='Оплата труда')
+
+    # df2.merge(df1, how='union', on='ФИО')
     main_features = _data_config['required_sheets']['basic']['features']
     common_features = {}
     specific_features = []
@@ -230,7 +266,7 @@ def check_and_parse(_data_config, _dataset_config):
     print(dt1.timestamp() - dt2.timestamp())
 
     main_dataset = collect_main_data(common_features, input_df_common, _data_config)
-    dataset = fill_snapshot_specific(specific_features, input_df_salary, main_dataset, dt2, 6)
+    dataset = fill_snapshot_specific(specific_features, input_df_salary, main_dataset, date(2024, 10, 2), 6)
 
 
 

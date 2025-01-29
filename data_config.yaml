@@ -141,7 +141,7 @@ required_sheets:
       f14:
         name: 'Декабрь'
   absenteeism:
-    name: 'Абсенцеизм'
+    name: 'Абсенцизм'
     name_out: 'absenteeism'
     kind: 'time_series'
     features:
@@ -287,7 +287,6 @@ required_sheets:
   meal:
     name: 'Обед'
     name_out: 'meal'
-    kind: 'time_series'
     features:
       f1:
         name: '№'
@@ -323,7 +322,6 @@ required_sheets:
   insurance:
     name: 'ДМС'
     name_out: 'insurance'
-    kind: 'time_series'
     features:
       f1:
         name: '№'

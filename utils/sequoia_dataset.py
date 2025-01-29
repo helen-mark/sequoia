@@ -15,6 +15,30 @@ class SequoiaDataset:
         self.dataset_config = _dataset_config
         self.snapshot_duration = _data_config['basic']['snapshot_duration']
 
+        self.data_dir = self.data_config['data_location']['data_path']
+        self.filename = self.data_config['data_location']['file_name']
+
+
+        # df2.merge(df1, how='union', on='ФИО')
+        self.main_features = self.data_config['required_sheets']['basic']['features']
+        self.common_features_name_mapping = {}
+        self.specific_features = []
+
+        # collect feature input names which are common for all snapshots:
+        for f_name in self.main_features.keys():
+            f = self.main_features[f_name]
+            if 'kind' in f.keys() and f['kind'] == 'common':
+                self.common_features_name_mapping[f['name']] = f['name_out']
+            else:
+                self.specific_features.append(f['name'])
+
+        self.time_series_name_mapping = {}
+        for key in self.data_config['required_sheets']:
+            if 'kind' in self.data_config['required_sheets'][key].keys():
+                if self.data_config['required_sheets'][key]['kind'] == 'time_series':
+                    self.time_series_name_mapping[self.data_config['required_sheets'][key]['name']] = self.data_config['required_sheets'][key]['name_out']
+        print(        self.time_series_name_mapping)
+
     def check_required_fields(self):
         pass
 
@@ -180,13 +204,16 @@ class SequoiaDataset:
     def fill_night_hours(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
         return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Количество ночных смен', 'night_hours')
 
+    def fill_penalties(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
+        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Взыскания', 'penalties')
+
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
         snapshot_columns = []
         snapshot_columns.extend(self.fill_salary(_input_file, _dataset, _snapshot_start))
         snapshot_columns.extend(self.fill_absenteeism(_input_file, _dataset, _snapshot_start))
         snapshot_columns.extend(self.fill_overtime(_input_file, _dataset, _snapshot_start))
         snapshot_columns.extend(self.fill_vacation(_input_file, _dataset, _snapshot_start))
-        snapshot_columns.extend(self.fill_night_hours(_input_file, _dataset, _snapshot_start))
+        snapshot_columns.extend(self.fill_penalties(_input_file, _dataset, _snapshot_start))
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
@@ -203,8 +230,7 @@ class SequoiaDataset:
         # - leader_left
         # - has_meal
         # - has_insurance
-        # - penalties_shortterm
-        # - penalties_longterm
+
 
     def fill_common_features(self, _f_name, _dataset, _col):
         if _f_name == 'n':
@@ -298,31 +324,15 @@ class SequoiaDataset:
 
 
     def check_and_parse(self):
-        data_dir = self.data_config['data_location']['data_path']
-        filename = self.data_config['data_location']['file_name']
-
-        input_df_common = read_excel(os.path.join(data_dir, filename), sheet_name='Основные данные')
-
-        # df2.merge(df1, how='union', on='ФИО')
-        main_features = self.data_config['required_sheets']['basic']['features']
-        common_features = {}
-        specific_features = []
-
-        # collect feature input names which are common for all snapshots:
-        for f_name in main_features.keys():
-            f = main_features[f_name]
-            if 'kind' in f.keys() and f['kind'] == 'common':
-                common_features[f['name']] = f['name_out']
-            else:
-                specific_features.append(f['name'])
-
+        data_file_path = os.path.join(self.data_dir, self.filename)
+        input_df_common = read_excel(data_file_path, sheet_name='Основные данные')
 
         dt1 = datetime.now()
         dt2 = datetime(2023, 1, 25)
         print(dt1.timestamp() - dt2.timestamp())
 
-        main_dataset = self.collect_main_data(common_features, input_df_common, self.data_config)
-        self.fill_snapshot_specific(specific_features, os.path.join(data_dir, filename), main_dataset, date(2024, 10, 2))
+        main_dataset = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config)
+        self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, date(2024, 10, 2))
 
 
 if __name__ == '__main__':

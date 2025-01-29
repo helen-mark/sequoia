@@ -127,9 +127,9 @@ class Dataset:
         df_salary = df_salary.drop(columns='№')
         df_salary = self.fill_dates(df_salary)
 
-        salary_longterm_col = pd.DataFrame({'salary_6m_average': []})
-        salary_cur_col = pd.DataFrame({'salary_current': []})
-        time_since_increase_col = pd.DataFrame({'time_since_salary_increase': []})
+        salary_longterm_col = pd.DataFrame({'code': [], 'salary_6m_average': []})
+        salary_cur_col = pd.DataFrame({'code': [], 'salary_current': []})
+        time_since_increase_col = pd.DataFrame({'code': [], 'time_since_salary_increase': []})
         count = 0
 
         for code in _dataset['code']:
@@ -144,9 +144,9 @@ class Dataset:
             print("Time since salary increase:", time_since_salary_increase)
             cur_salary = self.calc_salary_current(sample, _snapshot_start)
 
-            salary_longterm_col.loc[count] = salary_avg_6m.item()
-            salary_cur_col.loc[count] = cur_salary.item()
-            time_since_increase_col.loc[count] = time_since_salary_increase
+            salary_longterm_col.loc[count] = [code, salary_avg_6m.item()]
+            salary_cur_col.loc[count] = [code, cur_salary.item()]
+            time_since_increase_col.loc[count] = [code, time_since_salary_increase]
 
             count += 1
 
@@ -158,8 +158,8 @@ class Dataset:
 
         df_absent = df_absent.drop(columns='№')
         df_absent = self.fill_dates(df_absent)
-        absent_longterm_col = pd.DataFrame({'absenteeism_6m_average': []})
-        absent_shortterm_col = pd.DataFrame({'absenteeism_2m_average': []})
+        absent_longterm_col = pd.DataFrame({'code': [], 'absenteeism_6m_average': []})
+        absent_shortterm_col = pd.DataFrame({'code': [], 'absenteeism_2m_average': []})
         count = 0
 
         for code in _dataset['code']:
@@ -171,8 +171,8 @@ class Dataset:
             absent_avg_6m = self.calc_numerical_average(sample, 6, _snapshot_start)
             absent_avg_2m = self.calc_numerical_average(sample, 2, _snapshot_start)
 
-            absent_longterm_col.loc[count] = absent_avg_6m.item()
-            absent_shortterm_col.loc[count] = absent_avg_2m.item()
+            absent_longterm_col.loc[count] = [code, absent_avg_6m.item()]
+            absent_shortterm_col.loc[count] = [code, absent_avg_2m.item()]
 
             count += 1
 
@@ -180,9 +180,14 @@ class Dataset:
 
 
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _snapshot_dur: int):
-        salary_longterm_col, salary_cur_col, time_since_increase_col = self.fill_salary(_input_file, _dataset, _snapshot_start)
-        absent_shortterm_col, absent_longterm_col = self.fill_absenteeism(_input_file, _dataset, _snapshot_start)
+        snapshot_columns = [0, 0, 0, 0, 0,]
+        snapshot_columns[:3] = self.fill_salary(_input_file, _dataset, _snapshot_start)
+        snapshot_columns[3:] = self.fill_absenteeism(_input_file, _dataset, _snapshot_start)
 
+        for new_col in snapshot_columns:
+            _dataset = _dataset.merge(new_col, on='code', how='outer')
+
+        print(_dataset)
 
         # - age
         # - company_seniority

@@ -1,5 +1,5 @@
 from path_setup import SequoiaPath
-from utils.parse_raw_data import check_and_parse
+from utils.parse_raw_data import Dataset
 from datetime import datetime
 import yaml
 
@@ -17,7 +17,8 @@ def main():
         dataset_config = yaml.load(stream, yaml.Loader)
         # print(dataset_config['snapshot_features']["common"])
 
-    check_and_parse(data_config, dataset_config)
+    new_dataset = Dataset(data_config, dataset_config)
+    new_dataset.check_and_parse()
 
 
 if __name__ == '__main__':

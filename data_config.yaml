@@ -136,3 +136,188 @@ required_sheets:
         name: 'Ноябрь'
       f14:
         name: 'Декабрь'
+    absenteeism:
+      name: 'Абсенцеизм'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Январь'
+          type: 'str'
+        f4:
+          name: 'Февраль'
+        f5:
+          name: 'Март'
+        f6:
+          name: 'Апрель'
+        f7:
+          name: 'Май'
+        f8:
+          name: 'Июнь'
+        f9:
+          name: 'Июль'
+        f10:
+          name: 'Август'
+        f11:
+          name: 'Сентябрь'
+        f12:
+          name: 'Октябрь'
+        f13:
+          name: 'Ноябрь'
+        f14:
+          name: 'Декабрь'
+    vacation_days:
+      name: 'Отпуск'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Январь'
+          type: 'str'
+        f4:
+          name: 'Февраль'
+        f5:
+          name: 'Март'
+        f6:
+          name: 'Апрель'
+        f7:
+          name: 'Май'
+        f8:
+          name: 'Июнь'
+        f9:
+          name: 'Июль'
+        f10:
+          name: 'Август'
+        f11:
+          name: 'Сентябрь'
+        f12:
+          name: 'Октябрь'
+        f13:
+          name: 'Ноябрь'
+        f14:
+          name: 'Декабрь'
+    meal:
+      name: 'Обед'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Январь'
+          type: 'str'
+        f4:
+          name: 'Февраль'
+        f5:
+          name: 'Март'
+        f6:
+          name: 'Апрель'
+        f7:
+          name: 'Май'
+        f8:
+          name: 'Июнь'
+        f9:
+          name: 'Июль'
+        f10:
+          name: 'Август'
+        f11:
+          name: 'Сентябрь'
+        f12:
+          name: 'Октябрь'
+        f13:
+          name: 'Ноябрь'
+        f14:
+          name: 'Декабрь'
+    insurance:
+      name: 'ДМС'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Январь'
+          type: 'str'
+        f4:
+          name: 'Февраль'
+        f5:
+          name: 'Март'
+        f6:
+          name: 'Апрель'
+        f7:
+          name: 'Май'
+        f8:
+          name: 'Июнь'
+        f9:
+          name: 'Июль'
+        f10:
+          name: 'Август'
+        f11:
+          name: 'Сентябрь'
+        f12:
+          name: 'Октябрь'
+        f13:
+          name: 'Ноябрь'
+        f14:
+          name: 'Декабрь'
+    penalties:
+      name: 'Взыскания'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Январь'
+          type: 'str'
+        f4:
+          name: 'Февраль'
+        f5:
+          name: 'Март'
+        f6:
+          name: 'Апрель'
+        f7:
+          name: 'Май'
+        f8:
+          name: 'Июнь'
+        f9:
+          name: 'Июль'
+        f10:
+          name: 'Август'
+        f11:
+          name: 'Сентябрь'
+        f12:
+          name: 'Октябрь'
+        f13:
+          name: 'Ноябрь'
+        f14:
+          name: 'Декабрь'
+    company_structure:
+      name: 'Структура компании'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Подразделение'
+          type: 'str'
+        f4:
+          name: 'Прямой руководитель'
+          type: 'str'

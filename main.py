@@ -6,12 +6,10 @@ import yaml
 
 def main():
     SequoiaPath()
-    setup_path = 'data_config.yaml'
-    dataset_config_path = 'dataset_config.yaml'
+    setup_path = SequoiaPath.data_setup_file
+    dataset_config_path = SequoiaPath.dataset_setup_file
     with open(setup_path) as stream:
         data_config = yaml.load(stream, yaml.Loader)
-        # for key, val in data_config.items():
-        #     print(val)
 
     with open(dataset_config_path) as stream:
         dataset_config = yaml.load(stream, yaml.Loader)

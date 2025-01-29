@@ -97,7 +97,7 @@ class SequoiaDataset:
                 dates.append(name)
         return dates
 
-    def fill_dates(self, _input_df: pd.DataFrame):
+    def set_column_labels_as_dates(self, _input_df: pd.DataFrame):
         year = 2024
         new_columns = ['code']
         for i in range(1, 13):
@@ -110,7 +110,7 @@ class SequoiaDataset:
         df_salary = read_excel(_input_file, sheet_name='Оплата труда')
 
         df_salary = df_salary.drop(columns='№')
-        df_salary = self.fill_dates(df_salary)
+        df_salary = self.set_column_labels_as_dates(df_salary)
 
         salary_longterm_col = pd.DataFrame({'code': [], 'salary_avg': []})
         salary_cur_col = pd.DataFrame({'code': [], 'salary_current': []})
@@ -162,7 +162,7 @@ class SequoiaDataset:
         df = read_excel(_input_file, sheet_name=_sheet_name)
 
         df = df.drop(columns='№')
-        df = self.fill_dates(df)
+        df = self.set_column_labels_as_dates(df)
         longterm_col = pd.DataFrame({'code': [], _feature_name + '_longterm': []})
         shortterm_col = pd.DataFrame({'code': [], _feature_name + '_shortterm': []})
 
@@ -177,12 +177,16 @@ class SequoiaDataset:
     def fill_vacation(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
         return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Отпуск', 'vacation_days')
 
+    def fill_night_hours(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
+        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Количество ночных смен', 'night_hours')
+
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        snapshot_columns = [0, 0, 0, 0, 0, 0, 0, 0, 0]
-        snapshot_columns[:3] = self.fill_salary(_input_file, _dataset, _snapshot_start)
-        snapshot_columns[3:5] = self.fill_absenteeism(_input_file, _dataset, _snapshot_start)
-        snapshot_columns[5:7] = self.fill_overtime(_input_file, _dataset, _snapshot_start)
-        snapshot_columns[7:] = self.fill_vacation(_input_file, _dataset, _snapshot_start)
+        snapshot_columns = []
+        snapshot_columns.extend(self.fill_salary(_input_file, _dataset, _snapshot_start))
+        snapshot_columns.extend(self.fill_absenteeism(_input_file, _dataset, _snapshot_start))
+        snapshot_columns.extend(self.fill_overtime(_input_file, _dataset, _snapshot_start))
+        snapshot_columns.extend(self.fill_vacation(_input_file, _dataset, _snapshot_start))
+        snapshot_columns.extend(self.fill_night_hours(_input_file, _dataset, _snapshot_start))
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
@@ -196,7 +200,6 @@ class SequoiaDataset:
         # - income_avg
         # - income_current
         # - time_since_last_promotion
-        # - night_hours
         # - leader_left
         # - has_meal
         # - has_insurance

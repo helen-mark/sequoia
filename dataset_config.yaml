@@ -27,7 +27,8 @@ snapshot_features:
     - vacation_days_longterm  # except last month?
     - overtime_longterm
     - overtime_shortterm
-    - night_hours
+    - night_hours_longterm
+    - night_hours_shortterm
     - leader_left
     - has_meal
     - has_insurance

@@ -70,6 +70,7 @@ required_sheets:
         name: 'Дата истечения разрешения на работу'
   salary:
     name: 'Оплата труда'
+    name_out: 'salary'
     features:
       f1:
         name: '№'
@@ -104,6 +105,7 @@ required_sheets:
         name: 'Декабрь'
   income:
     name: 'Общий доход'
+    name_out: 'income'
     features:
       f1:
         name: '№'
@@ -138,6 +140,7 @@ required_sheets:
         name: 'Декабрь'
     absenteeism:
       name: 'Абсенцеизм'
+      name_out: 'absenteeism'
       features:
         f1:
           name: '№'
@@ -172,6 +175,7 @@ required_sheets:
           name: 'Декабрь'
     vacation_days:
       name: 'Отпуск'
+      name_out: 'vacation_days'
       features:
         f1:
           name: '№'
@@ -206,6 +210,7 @@ required_sheets:
           name: 'Декабрь'
     overtime:
       name: 'Переработка'
+      name_out: 'overtime'
       features:
         f1:
           name: '№'
@@ -240,6 +245,7 @@ required_sheets:
           name: 'Декабрь'
     night_hours:
       name: 'Количество ночных смен'
+      name_out: 'night_hours'
       features:
         f1:
           name: '№'
@@ -274,6 +280,7 @@ required_sheets:
           name: 'Декабрь'
     meal:
       name: 'Обед'
+      name_out: 'meal'
       features:
         f1:
           name: '№'
@@ -308,6 +315,7 @@ required_sheets:
           name: 'Декабрь'
     insurance:
       name: 'ДМС'
+      name_out: 'insurance'
       features:
         f1:
           name: '№'
@@ -342,6 +350,7 @@ required_sheets:
           name: 'Декабрь'
     penalties:
       name: 'Взыскания'
+      name_out: 'penalties'
       features:
         f1:
           name: '№'

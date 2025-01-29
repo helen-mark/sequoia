@@ -13,6 +13,7 @@ class SequoiaDataset:
     def __init__(self, _data_config, _dataset_config):
         self.data_config = _data_config
         self.dataset_config = _dataset_config
+        self.snapshot_duration = _data_config['basic']['snapshot_duration']
 
     def check_required_fields(self):
         pass
@@ -111,7 +112,7 @@ class SequoiaDataset:
         df_salary = df_salary.drop(columns='№')
         df_salary = self.fill_dates(df_salary)
 
-        salary_longterm_col = pd.DataFrame({'code': [], 'salary_6m_average': []})
+        salary_longterm_col = pd.DataFrame({'code': [], 'salary_avg': []})
         salary_cur_col = pd.DataFrame({'code': [], 'salary_current': []})
         time_since_increase_col = pd.DataFrame({'code': [], 'time_since_salary_increase': []})
         count = 0
@@ -136,35 +137,51 @@ class SequoiaDataset:
 
         return salary_longterm_col, salary_cur_col, time_since_increase_col
 
-    def fill_absenteeism(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        df_absent = read_excel(_input_file, sheet_name='Абсенцизм')
 
-        df_absent = df_absent.drop(columns='№')
-        df_absent = self.fill_dates(df_absent)
-        absent_longterm_col = pd.DataFrame({'code': [], 'absenteeism_6m_average': []})
-        absent_shortterm_col = pd.DataFrame({'code': [], 'absenteeism_2m_average': []})
+    def fill_average_values(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _snapshot_start: datetime.time):
         count = 0
 
         for code in _dataset['code']:
             print('\npersonal code:', code)
-            sample = df_absent.loc[df_absent['code'] == code]
+            sample = _feature_df.loc[_feature_df['code'] == code]
             sample = sample.drop(columns='code')  # leave ony columns with salary values
             print(sample)
 
             absent_avg_6m = self.calc_numerical_average(sample, 6, _snapshot_start)
             absent_avg_2m = self.calc_numerical_average(sample, 2, _snapshot_start)
 
-            absent_longterm_col.loc[count] = [code, absent_avg_6m.item()]
-            absent_shortterm_col.loc[count] = [code, absent_avg_2m.item()]
+            _longterm_avg.loc[count] = [code, absent_avg_6m.item()]
+            _shortterm_avg.loc[count] = [code, absent_avg_2m.item()]
 
             count += 1
 
-        return absent_shortterm_col, absent_longterm_col
+        return _shortterm_avg, _longterm_avg
 
-    def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _snapshot_dur: int):
-        snapshot_columns = [0, 0, 0, 0, 0,]
+    def fill_absenteeism(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
+        df_absent = read_excel(_input_file, sheet_name='Абсенцизм')
+
+        df_absent = df_absent.drop(columns='№')
+        df_absent = self.fill_dates(df_absent)
+        absent_longterm_col = pd.DataFrame({'code': [], 'absenteeism_longterm': []})
+        absent_shortterm_col = pd.DataFrame({'code': [], 'absenteeism_shortterm': []})
+
+        return self.fill_average_values(_dataset, df_absent, absent_longterm_col, absent_shortterm_col, _snapshot_start)
+
+    def fill_overtime(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
+        df_overtime = read_excel(_input_file, sheet_name='Переработка')
+
+        df_overtime = df_overtime.drop(columns='№')
+        df_overtime = self.fill_dates(df_overtime)
+        overtime_longterm_col = pd.DataFrame({'code': [], 'overtime_longterm': []})
+        overtime_shortterm_col = pd.DataFrame({'code': [], 'overtime_shortterm': []})
+
+        return self.fill_average_values(_dataset, df_overtime, overtime_longterm_col, overtime_shortterm_col, _snapshot_start)
+
+    def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
+        snapshot_columns = [0, 0, 0, 0, 0, 0, 0]
         snapshot_columns[:3] = self.fill_salary(_input_file, _dataset, _snapshot_start)
-        snapshot_columns[3:] = self.fill_absenteeism(_input_file, _dataset, _snapshot_start)
+        snapshot_columns[3:5] = self.fill_absenteeism(_input_file, _dataset, _snapshot_start)
+        snapshot_columns[5:] = self.fill_overtime(_input_file, _dataset, _snapshot_start)
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
@@ -175,15 +192,11 @@ class SequoiaDataset:
         # - company_seniority
         # - overall_experience
         # - license_expiration
-        # - salary_6m_average
-        # - salary_current
-        # - time_since_salary_increase
         # - income_6m_average
         # - income_current
         # - time_since_last_promotion
-        # - absenteeism_6m_average
-        # - absenteeism_2m_average
         # - vacation_days  # except last month?
+        # - night_hours
         # - leader_left_3m
         # - has_meal
         # - has_insurance
@@ -200,37 +213,47 @@ class SequoiaDataset:
         _dataset.insert(len(_dataset.columns), _f_name, reform_col)
 
     def lookup(self, f_name, key):
+        female = ['ж', 'Ж', 'жен', 'Жен', 'женский', 'Женский']
+        male = ['м', 'М', 'муж', 'Муж', 'мужской', 'Мужской']
+        russian = ['Россия', 'россия', 'Российское', 'российское']
+        not_russian = ['иное', 'НЕ РФ', 'НЕ Рф']
+        interm_education = ['среднее']
+        high_education = ['высшее']
+        spec_education = ['среднее специальное']
+        married = ['женат', 'замужем', 'в браке']
+        single = ['не женат', 'не замужем', 'не в браке']
+        logistics = ['логистика']
+        main_dept = ['основное производство', 'основной']
+
         if f_name == 'code':
             return int(key)
         elif f_name == 'gender':
-            if key in ['ж', 'Ж', 'жен', 'Жен', 'женский', 'Женский']:
+            if key in female:
                 return 1
-            elif key in ['м', 'М', 'муж', 'Муж', 'мужской', 'Мужской']:
+            elif key in male:
                 return 0
             else:
                 raise ValueError(f'Invalid gender format: {key}')
         elif f_name == 'citizenship':
-            if key in ['Россия', 'россия', 'Российское', 'российское']:
+            if key in russian:
                 return 0
-            elif key in ['иное', 'НЕ РФ', 'НЕ Рф']:
+            elif key in not_russian:
                 return 1
             else:
                 raise ValueError(f'Invalid citizenship format: {key}')
         elif f_name == 'education':
-            if key in ['среднее']:
+            if key in interm_education:
                 return 0
-            elif key in ['высшее']:
+            elif key in high_education:
                 return 1
-            elif key in ['среднее специальное']:
+            elif key in spec_education:
                 return 2
-            elif key in ['неоконченное высшее']:
-                return 3
             else:
                 raise ValueError(f'Invalid education format: {key}')
         elif f_name == 'family_status':
-            if key in ['женат', 'замужем', 'в браке']:
+            if key in married:
                 return 0
-            elif key in ['не женат', 'не замужем', 'не в браке']:
+            elif key in single:
                 return 1
             else:
                 raise ValueError(f'Invalid family status format: {key}')
@@ -241,9 +264,9 @@ class SequoiaDataset:
         elif f_name == 'to_work_travel_time':
             return float(key)
         elif f_name == 'department':
-            if key in ['логистика']:
+            if key in logistics:
                 return 1
-            elif key in ['основное производство', 'основной']:
+            elif key in main_dept:
                 return 0
             else:
                 raise ValueError(f'Invalid department format: {key}')
@@ -260,15 +283,14 @@ class SequoiaDataset:
 
 
     def collect_main_data(self, _common_features: {}, _input_df: pd.DataFrame, _data_config: dict):
-        dataset = pd.DataFrame()  # columns=[dataset_config['snapshot_features']["common"] + dataset_config['snapshot_features']["specific"]])
+        dataset = pd.DataFrame()
 
-        new_col = []
         for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
             if col.name in _common_features:
                 new_col = col.values
                 self.fill_common_features(_common_features[col.name], dataset, new_col)
 
-        print('result:', dataset)
+        print('common dataset result:', dataset)
         return dataset
 
 
@@ -297,7 +319,7 @@ class SequoiaDataset:
         print(dt1.timestamp() - dt2.timestamp())
 
         main_dataset = self.collect_main_data(common_features, input_df_common, self.data_config)
-        self.fill_snapshot_specific(specific_features, os.path.join(data_dir, filename), main_dataset, date(2024, 10, 2), 6)
+        self.fill_snapshot_specific(specific_features, os.path.join(data_dir, filename), main_dataset, date(2024, 10, 2))
 
 
 if __name__ == '__main__':

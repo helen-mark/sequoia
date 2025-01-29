@@ -204,6 +204,74 @@ required_sheets:
           name: 'Ноябрь'
         f14:
           name: 'Декабрь'
+    overtime:
+      name: 'Переработка'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Январь'
+          type: 'str'
+        f4:
+          name: 'Февраль'
+        f5:
+          name: 'Март'
+        f6:
+          name: 'Апрель'
+        f7:
+          name: 'Май'
+        f8:
+          name: 'Июнь'
+        f9:
+          name: 'Июль'
+        f10:
+          name: 'Август'
+        f11:
+          name: 'Сентябрь'
+        f12:
+          name: 'Октябрь'
+        f13:
+          name: 'Ноябрь'
+        f14:
+          name: 'Декабрь'
+    night_hours:
+      name: 'Количество ночных смен'
+      features:
+        f1:
+          name: '№'
+          type: 'int'
+        f2:
+          name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+          type: 'str'
+        f3:
+          name: 'Январь'
+          type: 'str'
+        f4:
+          name: 'Февраль'
+        f5:
+          name: 'Март'
+        f6:
+          name: 'Апрель'
+        f7:
+          name: 'Май'
+        f8:
+          name: 'Июнь'
+        f9:
+          name: 'Июль'
+        f10:
+          name: 'Август'
+        f11:
+          name: 'Сентябрь'
+        f12:
+          name: 'Октябрь'
+        f13:
+          name: 'Ноябрь'
+        f14:
+          name: 'Декабрь'
     meal:
       name: 'Обед'
       features:

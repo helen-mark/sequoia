@@ -15,17 +15,20 @@ snapshot_features:
     - company_seniority
     - overall_experience
     - license_expiration
-    - salary_6m_average
+    - salary_avg
     - salary_current
     - time_since_salary_increase
     - income_6m_average
     - income_current
     - time_since_last_promotion
-    - absenteeism_6m_average
-    - absenteeism_2m_average
+    - absenteeism_longterm
+    - absenteeism_shortterm
     - vacation_days  # except last month?
-    - leader_left_3m
+    - overtime_longterm
+    - overtime_shortterm
+    - night_hours
+    - leader_left
     - has_meal
     - has_insurance
-    - penalties_2m
-    - penalties_6m
+    - penalties_shortterm
+    - penalties_longterm

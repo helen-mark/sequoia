@@ -107,6 +107,7 @@ def calculate_feature_importance(_model: K.Model, _train_dataframe: pd.DataFrame
 def create_model(_all_features: tf.Tensor, _all_inputs: list):
     n_neurons = 32
     x = K.layers.Dense(n_neurons, activation="relu")(_all_features)
+    x = K.layers.Dense(n_neurons/2, activation="relu")(x)
     x = K.layers.Dropout(0.5)(x)
     output = K.layers.Dense(1, activation="sigmoid")(x)
     return K.Model(_all_inputs, output)
@@ -142,7 +143,7 @@ def train(_dataset_path: str, _batch_size: int):
         initial_value_threshold=None,
     )
     # fit the keras model
-    model.fit(train_ds, epochs=50, batch_size=_batch_size, validation_data=val_ds, callbacks=[tboard, save_best])
+    model.fit(train_ds, epochs=100, batch_size=_batch_size, validation_data=val_ds, callbacks=[tboard, save_best])
 
     print(model.summary())
     print('Evaluation...')

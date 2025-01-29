@@ -57,7 +57,6 @@ def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _num_iters):
 
 def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _num_iters):
     model = RandomForestRegressor(n_estimators=10, max_features='sqrt')
-    thrs = 0.5
     best_precision = 0.
     best_model = model
 
@@ -70,6 +69,7 @@ def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _num_iters):
         predictions = model.predict(_x_test)
 
         # Transform probabilities to binary classification output in order to calc metrics:
+        thrs = 0.5
         for i, p in enumerate(predictions):
             if p > thrs:
                 predictions[i] = 1
@@ -189,11 +189,6 @@ def train(_x_train, _y_train, _x_test, _y_test, _model_name, _num_iters, _maximi
         return
 
     return model
-    # models = [
-    #           # KNeighborsRegressor(n_neighbors=3),
-    #           # SVR(kernel='linear'),
-    #           # LogisticRegression(),
-    #           ]
 
 
 def normalize(_data: pd.DataFrame):
@@ -210,7 +205,6 @@ def prepare_dataset(_dataset_path: str, _test_split: float, _normalize: bool):
     trn = dataset[:target_idx]
 
     x_train, x_test, y_train, y_test = train_test_split(trn.transpose(), trg.transpose(), test_size=_test_split)
-    print("y_test", y_test)
 
     if _normalize:
         x_train = normalize(x_train)
@@ -271,17 +265,17 @@ if __name__ == '__main__':
         'test_split': 0.2,  # validation/training split proportion
         'normalize': False,  # normalize input values or not
         'num_iters': 20,  # number of fitting attempts
-        'maximize': 'Precision'  # metric to maximize
+        'maximize': 'Precision',  # metric to maximize
+        'dataset_src': 'data/october_works.csv'
     }
-    dataset_src = 'data/october_works.csv'
 
     # Load the dataset from file and split it to train/test:
-    x_train, x_test, y_train, y_test = prepare_dataset(dataset_src, config['test_split'], config['normalize'])
+    x_train, x_test, y_train, y_test = prepare_dataset(config['dataset_src'], config['test_split'], config['normalize'])
 
     # Train model and save it:
-    model = train(x_train, y_train, x_test, y_test, config['model'], config['num_iters'], config['maximize'])
-    show_decision_tree(model)
+    trained_model = train(x_train, y_train, x_test, y_test, config['model'], config['num_iters'], config['maximize'])
+    show_decision_tree(trained_model)
 
     with open('model.pkl', 'wb') as f:
        print("Saving model..")
-       pickle.dump(model, f)
+       pickle.dump(trained_model, f)

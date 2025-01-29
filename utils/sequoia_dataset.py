@@ -123,13 +123,13 @@ class SequoiaDataset:
             sample = sample.drop(columns='code')  # leave ony columns with salary values
             print(sample)
 
-            salary_avg_6m = self.calc_numerical_average(sample, 6, _snapshot_start)
+            salary_avg = self.calc_numerical_average(sample, 6, _snapshot_start)
             dates = self.calc_salary_increase_dates(sample)
             time_since_salary_increase = self.calc_time_since_salary_increase(dates, _snapshot_start)
             print("Time since salary increase:", time_since_salary_increase)
             cur_salary = self.calc_salary_current(sample, _snapshot_start)
 
-            salary_longterm_col.loc[count] = [code, salary_avg_6m.item()]
+            salary_longterm_col.loc[count] = [code, salary_avg.item()]
             salary_cur_col.loc[count] = [code, cur_salary.item()]
             time_since_increase_col.loc[count] = [code, time_since_salary_increase]
 
@@ -157,31 +157,32 @@ class SequoiaDataset:
 
         return _shortterm_avg, _longterm_avg
 
+
+    def process_timeseries(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _sheet_name: str, _feature_name: str):
+        df = read_excel(_input_file, sheet_name=_sheet_name)
+
+        df = df.drop(columns='№')
+        df = self.fill_dates(df)
+        longterm_col = pd.DataFrame({'code': [], _feature_name + '_longterm': []})
+        shortterm_col = pd.DataFrame({'code': [], _feature_name + '_shortterm': []})
+
+        return self.fill_average_values(_dataset, df, longterm_col, shortterm_col, _snapshot_start)
+
     def fill_absenteeism(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        df_absent = read_excel(_input_file, sheet_name='Абсенцизм')
-
-        df_absent = df_absent.drop(columns='№')
-        df_absent = self.fill_dates(df_absent)
-        absent_longterm_col = pd.DataFrame({'code': [], 'absenteeism_longterm': []})
-        absent_shortterm_col = pd.DataFrame({'code': [], 'absenteeism_shortterm': []})
-
-        return self.fill_average_values(_dataset, df_absent, absent_longterm_col, absent_shortterm_col, _snapshot_start)
+        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Абсенцизм', 'absenteeism')
 
     def fill_overtime(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        df_overtime = read_excel(_input_file, sheet_name='Переработка')
+        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Переработка', 'overtime')
 
-        df_overtime = df_overtime.drop(columns='№')
-        df_overtime = self.fill_dates(df_overtime)
-        overtime_longterm_col = pd.DataFrame({'code': [], 'overtime_longterm': []})
-        overtime_shortterm_col = pd.DataFrame({'code': [], 'overtime_shortterm': []})
-
-        return self.fill_average_values(_dataset, df_overtime, overtime_longterm_col, overtime_shortterm_col, _snapshot_start)
+    def fill_vacation(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
+        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Отпуск', 'vacation_days')
 
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        snapshot_columns = [0, 0, 0, 0, 0, 0, 0]
+        snapshot_columns = [0, 0, 0, 0, 0, 0, 0, 0, 0]
         snapshot_columns[:3] = self.fill_salary(_input_file, _dataset, _snapshot_start)
         snapshot_columns[3:5] = self.fill_absenteeism(_input_file, _dataset, _snapshot_start)
-        snapshot_columns[5:] = self.fill_overtime(_input_file, _dataset, _snapshot_start)
+        snapshot_columns[5:7] = self.fill_overtime(_input_file, _dataset, _snapshot_start)
+        snapshot_columns[7:] = self.fill_vacation(_input_file, _dataset, _snapshot_start)
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
@@ -192,16 +193,15 @@ class SequoiaDataset:
         # - company_seniority
         # - overall_experience
         # - license_expiration
-        # - income_6m_average
+        # - income_avg
         # - income_current
         # - time_since_last_promotion
-        # - vacation_days  # except last month?
         # - night_hours
-        # - leader_left_3m
+        # - leader_left
         # - has_meal
         # - has_insurance
-        # - penalties_2m
-        # - penalties_6m
+        # - penalties_shortterm
+        # - penalties_longterm
 
     def fill_common_features(self, _f_name, _dataset, _col):
         if _f_name == 'n':

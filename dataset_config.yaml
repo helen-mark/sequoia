@@ -18,12 +18,13 @@ snapshot_features:
     - salary_avg
     - salary_current
     - time_since_salary_increase
-    - income_6m_average
+    - income_avg
     - income_current
     - time_since_last_promotion
     - absenteeism_longterm
     - absenteeism_shortterm
-    - vacation_days  # except last month?
+    - vacation_days_shortterm  # except last month?
+    - vacation_days_longterm  # except last month?
     - overtime_longterm
     - overtime_shortterm
     - night_hours

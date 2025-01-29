@@ -8,7 +8,8 @@ from pandas import read_excel
 
 from path_setup import SequoiaPath
 
-class Dataset:
+
+class SequoiaDataset:
     def __init__(self, _data_config, _dataset_config):
         self.data_config = _data_config
         self.dataset_config = _dataset_config
@@ -16,22 +17,17 @@ class Dataset:
     def check_required_fields(self):
         pass
 
-
     def calc_age(self):
         pass
-
 
     def calc_company_seniority(self):
         pass
 
-
     def calc_overall_experience(self):
         pass
 
-
     def calc_license_expiration(self):
         pass
-
 
     def calc_numerical_average(self, _values_per_month: pd.DataFrame, _period_months: int, _snapshot_start: datetime.date):
         assert not _values_per_month.empty
@@ -54,7 +50,6 @@ class Dataset:
         print("Average:", avg)
         return avg
 
-
     def calc_salary_current(self, _salary_per_month: pd.DataFrame, _snapshot_start: datetime.date):
         assert len(_salary_per_month) > 0
         _salary_per_month = _salary_per_month[_salary_per_month.columns[::-1]]  # this operation reverses order of columns
@@ -65,38 +60,29 @@ class Dataset:
                 print('Take salary at', date)
                 return val
 
-
     def calc_time_since_salary_increase(self, _salary_increase_dates: list, _snapshot_start: datetime.date):
         _salary_increase_dates.reverse()
         for date in _salary_increase_dates:
             if date < _snapshot_start:
                 return _snapshot_start - date
 
-
     def calc_time_since_promotion(self):
         pass
-
-
 
     def calc_vacation_days(self):
         pass
 
-
     def check_leader_left(self):
         pass
-
 
     def check_has_meal(self):
         pass
 
-
     def check_has_insurance(self):
         pass
 
-
     def calc_penalties(self, _period_months: int):
         pass
-
 
     def calc_salary_increase_dates(self, _salary_per_month: pd.DataFrame):
         dates = []
@@ -110,7 +96,6 @@ class Dataset:
                 dates.append(name)
         return dates
 
-
     def fill_dates(self, _input_df: pd.DataFrame):
         year = 2024
         new_columns = ['code']
@@ -119,7 +104,6 @@ class Dataset:
         print((new_columns[3] - new_columns[2]).days)
         _input_df.columns = new_columns
         return _input_df
-
 
     def fill_salary(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
         df_salary = read_excel(_input_file, sheet_name='Оплата труда')
@@ -152,7 +136,6 @@ class Dataset:
 
         return salary_longterm_col, salary_cur_col, time_since_increase_col
 
-
     def fill_absenteeism(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
         df_absent = read_excel(_input_file, sheet_name='Абсенцизм')
 
@@ -177,7 +160,6 @@ class Dataset:
             count += 1
 
         return absent_shortterm_col, absent_longterm_col
-
 
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _snapshot_dur: int):
         snapshot_columns = [0, 0, 0, 0, 0,]
@@ -208,7 +190,6 @@ class Dataset:
         # - penalties_2m
         # - penalties_6m
 
-
     def fill_common_features(self, _f_name, _dataset, _col):
         if _f_name == 'n':
             return
@@ -217,7 +198,6 @@ class Dataset:
             f = self.lookup(_f_name, c)
             reform_col.append(f)
         _dataset.insert(len(_dataset.columns), _f_name, reform_col)
-
 
     def lookup(self, f_name, key):
         if f_name == 'code':
@@ -330,5 +310,5 @@ if __name__ == '__main__':
         dataset_config = yaml.load(stream, yaml.Loader)
         # print(dataset_config['snapshot_features']["common"])
 
-    new_dataset = Dataset(data_config, dataset_config)
+    new_dataset = SequoiaDataset(data_config, dataset_config)
     new_dataset.check_and_parse()

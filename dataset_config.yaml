@@ -20,7 +20,7 @@ snapshot_features:
     - time_since_salary_increase
     - income_avg
     - income_current
-    - time_since_last_promotion
+    - days_since_promotion
     - absenteeism_longterm
     - absenteeism_shortterm
     - vacation_days_shortterm  # except last month?

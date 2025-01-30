@@ -140,6 +140,18 @@ required_sheets:
         name: 'Ноябрь'
       f14:
         name: 'Декабрь'
+  promotions:
+    name: 'Дата повышения'
+    name_out: 'days_since_promotion'
+    features:
+      f1:
+        name: '№'
+        type: 'int'
+      f2:
+        name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+        type: 'str'
+      f3:
+        name: 'Дата последнего повышения'
   absenteeism:
     name: 'Абсенцизм'
     name_out: 'absenteeism'

@@ -85,17 +85,11 @@ class SequoiaDataset:
                 print('Take salary at', date)
                 return val
 
-    def calc_time_since_salary_increase(self, _salary_increase_dates: list, _snapshot_start: datetime.date):
-        _salary_increase_dates.reverse()
-        for date in _salary_increase_dates:
+    def calc_time_since_latest_event(self, _event_dates: list, _snapshot_start: datetime.date):
+        _event_dates.reverse()
+        for date in _event_dates:
             if date < _snapshot_start:
                 return _snapshot_start - date
-
-    def calc_time_since_promotion(self):
-        pass
-
-    def calc_vacation_days(self):
-        pass
 
     def check_leader_left(self):
         pass
@@ -104,9 +98,6 @@ class SequoiaDataset:
         pass
 
     def check_has_insurance(self):
-        pass
-
-    def calc_penalties(self, _period_months: int):
         pass
 
     def calc_salary_increase_dates(self, _salary_per_month: pd.DataFrame):
@@ -130,12 +121,7 @@ class SequoiaDataset:
         _input_df.columns = new_columns
         return _input_df
 
-    def fill_salary(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        df_salary = read_excel(_input_file, sheet_name='Оплата труда')
-
-        df_salary = df_salary.drop(columns='№')
-        df_salary = self.set_column_labels_as_dates(df_salary)
-
+    def fill_salary(self, df_salary: pd.DataFrame, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
         salary_longterm_col = pd.DataFrame({'code': [], 'salary_avg': []})
         salary_cur_col = pd.DataFrame({'code': [], 'salary_current': []})
         time_since_increase_col = pd.DataFrame({'code': [], 'time_since_salary_increase': []})
@@ -149,7 +135,7 @@ class SequoiaDataset:
 
             salary_avg = self.calc_numerical_average(sample, 6, _snapshot_start)
             dates = self.calc_salary_increase_dates(sample)
-            time_since_salary_increase = self.calc_time_since_salary_increase(dates, _snapshot_start)
+            time_since_salary_increase = self.calc_time_since_latest_event(dates, _snapshot_start)
             print("Time since salary increase:", time_since_salary_increase)
             cur_salary = self.calc_salary_current(sample, _snapshot_start)
 
@@ -160,7 +146,6 @@ class SequoiaDataset:
             count += 1
 
         return salary_longterm_col, salary_cur_col, time_since_increase_col
-
 
     def fill_average_values(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _snapshot_start: datetime.time):
         count = 0
@@ -181,39 +166,47 @@ class SequoiaDataset:
 
         return _shortterm_avg, _longterm_avg
 
+    def calc_time_since_promotion(self, _input_file: str, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
+        sheet_name = 'Дата повышения'
+        df = read_excel(_input_file, sheet_name=sheet_name)
+        df = df.drop(columns='№')
+        df.columns = ['code', 'Дата последнего повышения']
+
+        count = 0
+        days_since_prom = pd.DataFrame({'code': [], 'days_since_promotion' + '_shortterm': []})
+
+        for code in _dataset['code']:
+            sample = df.loc[df['code'] == code]
+            sample = sample.drop(columns='code')  # leave ony columns with salary values
+            date_str = str(sample.iloc[0].item())
+            splt = date_str.split('.')
+            date_dt = date(int(splt[2]), int(splt[1]), int(splt[0]))
+
+            res = self.calc_time_since_latest_event([date_dt], _snapshot_start)
+            days_since_prom.loc[count] = [code, res.days]
+            count += 1
+        return days_since_prom
 
     def process_timeseries(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time, _sheet_name: str, _feature_name: str):
         df = read_excel(_input_file, sheet_name=_sheet_name)
 
         df = df.drop(columns='№')
         df = self.set_column_labels_as_dates(df)
+
+        if _feature_name in 'salary':
+            return self.fill_salary(df, _dataset, _snapshot_start)
         longterm_col = pd.DataFrame({'code': [], _feature_name + '_longterm': []})
         shortterm_col = pd.DataFrame({'code': [], _feature_name + '_shortterm': []})
 
         return self.fill_average_values(_dataset, df, longterm_col, shortterm_col, _snapshot_start)
 
-    def fill_absenteeism(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Абсенцизм', 'absenteeism')
-
-    def fill_overtime(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Переработка', 'overtime')
-
-    def fill_vacation(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Отпуск', 'vacation_days')
-
-    def fill_night_hours(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Количество ночных смен', 'night_hours')
-
-    def fill_penalties(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
-        return self.process_timeseries(_input_file, _dataset, _snapshot_start, 'Взыскания', 'penalties')
-
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot_start: datetime.time):
         snapshot_columns = []
-        snapshot_columns.extend(self.fill_salary(_input_file, _dataset, _snapshot_start))
-        snapshot_columns.extend(self.fill_absenteeism(_input_file, _dataset, _snapshot_start))
-        snapshot_columns.extend(self.fill_overtime(_input_file, _dataset, _snapshot_start))
-        snapshot_columns.extend(self.fill_vacation(_input_file, _dataset, _snapshot_start))
-        snapshot_columns.extend(self.fill_penalties(_input_file, _dataset, _snapshot_start))
+
+        for sheet_name, feature_name in self.time_series_name_mapping.items():
+            snapshot_columns.extend(self.process_timeseries(_input_file, _dataset, _snapshot_start, sheet_name, feature_name))
+
+        snapshot_columns.extend([self.calc_time_since_promotion(_input_file, _dataset, _snapshot_start)])
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
@@ -226,11 +219,9 @@ class SequoiaDataset:
         # - license_expiration
         # - income_avg
         # - income_current
-        # - time_since_last_promotion
         # - leader_left
         # - has_meal
         # - has_insurance
-
 
     def fill_common_features(self, _f_name, _dataset, _col):
         if _f_name == 'n':

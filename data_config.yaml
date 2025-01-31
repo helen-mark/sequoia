@@ -1,6 +1,7 @@
 data_location:
   data_path: 'data/'
   file_name: 'data.xlsx'  # check file extension
+  output_name: 'sequoia_dataset.csv'
 basic:
   snapshot_duration: 6  # months
   date_format: '%Y.%m.%d'
@@ -52,8 +53,12 @@ required_sheets:
         kind: 'common'
       f11:
         name: 'Дата найма'
+        name_out: 'recruitment_date'
+        kind: 'common'
       f12:
         name: 'Дата увольнения'
+        name_out: 'termination_date'
+        kind: 'common'
       f13:
         name: 'Причина увольнения'
       f14:

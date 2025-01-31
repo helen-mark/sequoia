@@ -16,7 +16,7 @@ def main():
         # print(dataset_config['snapshot_features']["common"])
 
     new_dataset = SequoiaDataset(data_config, dataset_config)
-    new_dataset.check_and_parse()
+    new_dataset.run()
 
 
 if __name__ == '__main__':

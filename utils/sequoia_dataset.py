@@ -94,12 +94,12 @@ class SequoiaDataset:
                 return val
         return None
 
-    def calc_time_since_latest_event(self, _event_dates: list, _snapshot_start: datetime.date):
+    def calc_time_since_latest_event(self, _event_dates: list, _snapshot_start: datetime.date, _recruitment_date: datetime.date):
         _event_dates.reverse()
         for date in _event_dates:
             if date < _snapshot_start:
                 return _snapshot_start - date
-        return None
+        return _snapshot_start - _recruitment_date
 
     def check_leader_left(self):
         pass
@@ -143,55 +143,6 @@ class SequoiaDataset:
         snapshot_start = date(year, month, 1)
         return snapshot_start
 
-
-    def fill_salary(self, df_salary: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot):
-        salary_longterm_col = pd.DataFrame({'code': [], 'salary_avg': []})
-        salary_cur_col = pd.DataFrame({'code': [], 'salary_current': []})
-        time_since_increase_col = pd.DataFrame({'code': [], 'time_since_salary_increase': []})
-        count = 0
-
-        for code in _dataset['code']:
-            sample = df_salary.loc[df_salary['code'] == code]
-            sample = sample.drop(columns='code')  # leave ony columns with salary values
-            person_recruitment_date = _dataset.loc[_dataset['code'] == code]['recruitment_date'].item()
-            person_termination_date = _dataset.loc[_dataset['code'] == code]['termination_date'].item()
-
-            snapshot_start = self.calc_individual_snapshot_start(_snapshot, person_recruitment_date, person_termination_date)
-
-            salary_avg = self.calc_numerical_average(sample, 6, snapshot_start)
-            dates = self.calc_salary_increase_dates(sample)
-            time_since_salary_increase = self.calc_time_since_latest_event(dates, snapshot_start)
-            cur_salary = self.calc_salary_current(sample, snapshot_start)
-
-            salary_longterm_col.loc[count] = [code, salary_avg.item()]
-            salary_cur_col.loc[count] = [code, cur_salary.item()]
-            time_since_increase_col.loc[count] = [code, time_since_salary_increase]
-
-            count += 1
-
-        return salary_longterm_col, salary_cur_col, time_since_increase_col
-
-    def fill_average_values(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _snapshot: SnapShot):
-        count = 0
-
-        for code in _dataset['code']:
-            sample = _feature_df.loc[_feature_df['code'] == code]
-            sample = sample.drop(columns='code')  # leave ony columns with salary values
-            person_recruitment_date = _dataset.loc[_dataset['code'] == code]['recruitment_date'].item()
-            person_termination_date = _dataset.loc[_dataset['code'] == code]['termination_date'].item()
-
-            snapshot_start = self.calc_individual_snapshot_start(_snapshot, person_recruitment_date,
-                                                                 person_termination_date)
-
-            avg_6m = self.calc_numerical_average(sample, 6, snapshot_start)
-            avg_2m = self.calc_numerical_average(sample, 2, snapshot_start)
-            _longterm_avg.loc[count] = [code, avg_6m.item()]
-            _shortterm_avg.loc[count] = [code, avg_2m.item()]
-
-            count += 1
-
-        return _shortterm_avg, _longterm_avg
-
     def apply_snapshot_specific_codes(self, _dataset: pd.DataFrame, _snapshot_num: int):
         codes = _dataset['code']
         new_codes = []
@@ -204,30 +155,51 @@ class SequoiaDataset:
         splt = _date_str.split('.')
         return date(int(splt[2]), int(splt[1]), int(splt[0]))
 
-    def calc_time_since_promotion(self, _input_file: str, _dataset: pd.DataFrame, _snapshot: SnapShot):
-        sheet_name = 'Дата повышения'
-        df = read_excel(_input_file, sheet_name=sheet_name)
-        df = df.drop(columns='№')
-        df.columns = ['code', 'Дата последнего повышения']
+    def prepare_sample(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _code: int):
+        sample = _feature_df.loc[_feature_df['code'] == _code]
+        sample = sample.drop(columns='code')  # leave ony columns with salary values
+        person_recruitment_date = _dataset.loc[_dataset['code'] == _code]['recruitment_date'].item()
+        person_termination_date = _dataset.loc[_dataset['code'] == _code]['termination_date'].item()
 
+        snapshot_start = self.calc_individual_snapshot_start(_snapshot, person_recruitment_date,
+                                                             person_termination_date)
+        return sample, snapshot_start, person_recruitment_date
+
+    def fill_average_values(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _snapshot: SnapShot):
         count = 0
-        days_since_prom = pd.DataFrame({'code': [], 'days_since_promotion' + '_shortterm': []})
 
         for code in _dataset['code']:
-            sample = df.loc[df['code'] == code]
-            sample = sample.drop(columns='code')  # leave ony columns with salary values
-            date_str = str(sample.iloc[0].item())
-            date_dt = self.str_to_datetime(date_str)
-            person_recruitment_date = _dataset.loc[_dataset['code'] == code]['recruitment_date'].item()
-            person_termination_date = _dataset.loc[_dataset['code'] == code]['termination_date'].item()
+            sample, snapshot_start, _ = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
 
-            snapshot_start = self.calc_individual_snapshot_start(_snapshot, person_recruitment_date,
-                                                                 person_termination_date)
+            avg_6m = self.calc_numerical_average(sample, 6, snapshot_start)
+            avg_2m = self.calc_numerical_average(sample, 2, snapshot_start)
+            _longterm_avg.loc[count] = [code, avg_6m.item()]
+            _shortterm_avg.loc[count] = [code, avg_2m.item()]
 
-            res = self.calc_time_since_latest_event([date_dt], snapshot_start)
-            days_since_prom.loc[count] = [code, res.days]
             count += 1
-        return days_since_prom
+
+        return _shortterm_avg, _longterm_avg
+
+    def calc_time_since_events(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _feature_name: str):
+        time_since_event = pd.DataFrame({'code': [], _feature_name: []})
+        count = 0
+
+        for code in _dataset['code']:
+            sample, snapshot_start, person_recruitment_date = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
+
+            if _feature_name == 'time_since_salary_increase':
+                dates = self.calc_salary_increase_dates(sample)
+            elif _feature_name == 'days_since_promotion':
+                dates_str = sample.iloc[0].values
+                print(dates_str)
+                dates = [self.str_to_datetime(x) for x in dates_str]
+
+            time_since_salary_increase = self.calc_time_since_latest_event(dates, snapshot_start, person_recruitment_date)
+            time_since_event.loc[count] = [code, time_since_salary_increase]
+
+            count += 1
+
+        return time_since_event
 
     def process_timeseries(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot, _sheet_name: str, _feature_name: str):
         df = read_excel(_input_file, sheet_name=_sheet_name)
@@ -235,10 +207,9 @@ class SequoiaDataset:
         df = df.drop(columns='№')
         df = self.set_column_labels_as_dates(df)
 
-        if _feature_name == 'salary':
-            return self.fill_salary(df, _dataset, _snapshot)
         longterm_col = pd.DataFrame({'code': [], _feature_name + '_longterm': []})
         shortterm_col = pd.DataFrame({'code': [], _feature_name + '_shortterm': []})
+
         return self.fill_average_values(_dataset, df, longterm_col, shortterm_col, _snapshot)
 
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot):
@@ -247,7 +218,17 @@ class SequoiaDataset:
         for sheet_name, feature_name in self.time_series_name_mapping.items():
             snapshot_columns.extend(self.process_timeseries(_input_file, _dataset, _snapshot, sheet_name, feature_name))
 
-        snapshot_columns.extend([self.calc_time_since_promotion(_input_file, _dataset, _snapshot)])
+        feature_name = 'days_since_promotion'
+        df = read_excel(_input_file, sheet_name='Дата повышения')
+        df = df.drop(columns='№')
+        df.columns = ['code', 'Дата последнего повышения']
+        snapshot_columns.extend([self.calc_time_since_events(df, _dataset, _snapshot, feature_name)])
+
+        feature_name = 'time_since_salary_increase'
+        df = read_excel(_input_file, sheet_name='Оплата труда')
+        df = df.drop(columns='№')
+        df = self.set_column_labels_as_dates(df)
+        snapshot_columns.extend([self.calc_time_since_events(df, _dataset, _snapshot, feature_name)])
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')

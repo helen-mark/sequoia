@@ -2,7 +2,7 @@
 
 File named data.xlsx with initial data should be put in sequoia/data directory.
 It should contain one table per sheet.
-required names on sheets can be found in data_config.yaml file.
+Required names of sheets can be found in data_config.yaml file.
 
 Run
 ```bash

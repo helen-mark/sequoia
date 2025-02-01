@@ -21,6 +21,44 @@ class SnapShot:
         return self.initial_offset + self.duration*self.num
 
 
+class IrregularEvents:
+    def __init__(self, _input_file: str, _feature_name: str, _sheet_name: str, _kind: str):
+        self.feature_name = _feature_name
+        self.sheet_name = _sheet_name
+        self.kind = _kind
+        df = read_excel(_input_file, sheet_name=_sheet_name)
+        df = df.drop(columns='№')
+        if _kind == 'event_list':
+            df.columns = ['code', _sheet_name]
+        elif _kind == 'time_series':
+            df = SequoiaDataset.set_column_labels_as_dates(df)
+        else:
+            raise ValueError(f'Unexpected event kind: {_kind}')
+        self.events = df
+
+    def events_dates(self, _code: int):
+        sample = self.events.loc[self.events['code'] == _code]
+        sample = sample.drop(columns='code')  # leave ony columns with salary values
+
+        if self.kind == 'time_series':
+            dates = self.calc_value_increase_dates(sample)
+        elif self.kind == 'event_list':
+            dates_str = sample.iloc[0].values
+            dates = [SequoiaDataset.str_to_datetime(x) for x in dates_str]
+        return dates
+
+    def calc_value_increase_dates(self, _values_per_month: pd.DataFrame):
+        dates = []
+        assert not _values_per_month.empty
+
+        salary_prev = 0
+        for name, val in _values_per_month.items():  # same order of columns like in xlsx table
+            if val.item() > salary_prev:  # consider employers' first salary as increase too
+                salary_prev = val.item()
+                dates.append(name)
+        return dates
+
+
 class SequoiaDataset:
     def __init__(self, _data_config, _dataset_config):
         logging.info("Initializing new dataset instance...")
@@ -46,10 +84,14 @@ class SequoiaDataset:
                 self.specific_features.append(f['name'])
 
         self.time_series_name_mapping = {}
+        self.events_name_mapping = {}
         for key in self.data_config['required_sheets']:
             if 'kind' in self.data_config['required_sheets'][key].keys():
-                if self.data_config['required_sheets'][key]['kind'] == 'time_series':
+                if 'time_series' in self.data_config['required_sheets'][key]['kind']:
                     self.time_series_name_mapping[self.data_config['required_sheets'][key]['name']] = self.data_config['required_sheets'][key]['name_out']
+                if 'events' in self.data_config['required_sheets'][key]['kind']:
+                    self.events_name_mapping[self.data_config['required_sheets'][key]['name']] = \
+                    self.data_config['required_sheets'][key]['name_out']
 
     def check_required_fields(self):
         pass
@@ -65,6 +107,16 @@ class SequoiaDataset:
 
     def calc_license_expiration(self):
         pass
+
+    @staticmethod
+    def set_column_labels_as_dates(_input_df: pd.DataFrame):
+        year = 2024
+        new_columns = ['code']
+        for i in range(1, 13):
+            new_columns.append(date(year, i, 1))
+        _input_df.columns = new_columns
+        return _input_df
+
 
     def calc_numerical_average(self, _values_per_month: pd.DataFrame, _period_months: int, _snapshot_start: datetime.date):
         assert not _values_per_month.empty
@@ -110,25 +162,6 @@ class SequoiaDataset:
     def check_has_insurance(self):
         pass
 
-    def calc_salary_increase_dates(self, _salary_per_month: pd.DataFrame):
-        dates = []
-        assert not _salary_per_month.empty
-
-        salary_prev = 0
-        for name, val in _salary_per_month.items():  # same order of columns like in xlsx table
-            if val.item() > salary_prev:  # consider employers' first salary as increase too
-                salary_prev = val.item()
-                dates.append(name)
-        return dates
-
-    def set_column_labels_as_dates(self, _input_df: pd.DataFrame):
-        year = 2024
-        new_columns = ['code']
-        for i in range(1, 13):
-            new_columns.append(date(year, i, 1))
-        _input_df.columns = new_columns
-        return _input_df
-
     def calc_individual_snapshot_start(self, _snapshot: SnapShot, _recruitment_date: date, _term_date: date):
         offset_months = _snapshot.num * _snapshot.duration + _snapshot.initial_offset
         offset_years = int(np.floor(offset_months / 12))
@@ -151,7 +184,8 @@ class SequoiaDataset:
         _dataset['code'] = new_codes
         return _dataset
 
-    def str_to_datetime(self, _date_str: str):
+    @staticmethod
+    def str_to_datetime(_date_str: str):
         splt = _date_str.split('.')
         return date(int(splt[2]), int(splt[1]), int(splt[0]))
 
@@ -180,19 +214,13 @@ class SequoiaDataset:
 
         return _shortterm_avg, _longterm_avg
 
-    def calc_time_since_events(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _feature_name: str):
-        time_since_event = pd.DataFrame({'code': [], _feature_name: []})
+    def calc_time_since_events(self, _events: IrregularEvents, _dataset: pd.DataFrame, _snapshot: SnapShot):
+        time_since_event = pd.DataFrame({'code': [], _events.feature_name: []})
         count = 0
 
         for code in _dataset['code']:
-            sample, snapshot_start, person_recruitment_date = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
-
-            if _feature_name == 'time_since_salary_increase':
-                dates = self.calc_salary_increase_dates(sample)
-            elif _feature_name == 'days_since_promotion':
-                dates_str = sample.iloc[0].values
-                print(dates_str)
-                dates = [self.str_to_datetime(x) for x in dates_str]
+            _, snapshot_start, person_recruitment_date = self.prepare_sample(_events.events, _dataset, _snapshot, code)
+            dates = _events.events_dates(code)
 
             time_since_salary_increase = self.calc_time_since_latest_event(dates, snapshot_start, person_recruitment_date)
             time_since_event.loc[count] = [code, time_since_salary_increase]
@@ -218,17 +246,11 @@ class SequoiaDataset:
         for sheet_name, feature_name in self.time_series_name_mapping.items():
             snapshot_columns.extend(self.process_timeseries(_input_file, _dataset, _snapshot, sheet_name, feature_name))
 
-        feature_name = 'days_since_promotion'
-        df = read_excel(_input_file, sheet_name='Дата повышения')
-        df = df.drop(columns='№')
-        df.columns = ['code', 'Дата последнего повышения']
-        snapshot_columns.extend([self.calc_time_since_events(df, _dataset, _snapshot, feature_name)])
+        ie = IrregularEvents(_input_file, 'days_since_promotion', 'Дата повышения', 'event_list')
+        snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
 
-        feature_name = 'time_since_salary_increase'
-        df = read_excel(_input_file, sheet_name='Оплата труда')
-        df = df.drop(columns='№')
-        df = self.set_column_labels_as_dates(df)
-        snapshot_columns.extend([self.calc_time_since_events(df, _dataset, _snapshot, feature_name)])
+        ie = IrregularEvents(_input_file, 'time_since_salary_increase', 'Оплата труда', 'time_series')
+        snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
@@ -354,7 +376,9 @@ class SequoiaDataset:
         input_df_common = read_excel(data_file_path, sheet_name='Основные данные')
 
         snapshot_dur = 6
-        snapshot = SnapShot(snapshot_dur, 3, 0)
+        initial_offset = 3
+        snapshot_num = 0
+        snapshot = SnapShot(snapshot_dur, initial_offset, snapshot_num)
         united_dataset = pd.DataFrame()
         while True:
             logging.info(f'Starting snapshot {snapshot.num}')

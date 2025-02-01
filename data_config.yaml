@@ -76,7 +76,7 @@ required_sheets:
   salary:
     name: 'Оплата труда'
     name_out: 'salary'
-    kind: 'time_series'
+    kind: ['time_series', 'events']
     features:
       f1:
         name: '№'
@@ -112,7 +112,7 @@ required_sheets:
   income:
     name: 'Общий доход'
     name_out: 'income'
-    kind: 'time_series'
+    kind: ['time_series', 'events']
     features:
       f1:
         name: '№'
@@ -148,6 +148,7 @@ required_sheets:
   promotions:
     name: 'Дата повышения'
     name_out: 'days_since_promotion'
+    kind: 'events'
     features:
       f1:
         name: '№'

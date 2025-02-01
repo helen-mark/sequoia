@@ -85,13 +85,23 @@ class SequoiaDataset:
 
         self.time_series_name_mapping = {}
         self.events_name_mapping = {}
+        self.required_sheets = []
         for key in self.data_config['required_sheets']:
+            self.required_sheets.append(self.data_config['required_sheets'][key]['name'])
             if 'kind' in self.data_config['required_sheets'][key].keys():
                 if 'time_series' in self.data_config['required_sheets'][key]['kind']:
                     self.time_series_name_mapping[self.data_config['required_sheets'][key]['name']] = self.data_config['required_sheets'][key]['name_out']
                 if 'events' in self.data_config['required_sheets'][key]['kind']:
                     self.events_name_mapping[self.data_config['required_sheets'][key]['name']] = \
                     self.data_config['required_sheets'][key]['name_out']
+
+    def check_required_sheets(self, _required_sheets: [], _actual_sheets: []):
+        absent = []
+        for s in _required_sheets:
+            if s not in _actual_sheets:
+                absent.append(s)
+        if len(absent) > 0:
+            raise Exception(f'Required sheets absent in input file: {absent}\nPresent sheetnames: {_actual_sheets}')
 
     def check_required_fields(self):
         pass
@@ -373,7 +383,10 @@ class SequoiaDataset:
 
     def run(self):
         data_file_path = os.path.join(self.data_dir, self.filename)
-        input_df_common = read_excel(data_file_path, sheet_name='Основные данные')
+        data_file = pd.ExcelFile(data_file_path)
+        self.check_required_sheets(self.required_sheets, data_file.sheet_names)
+
+        input_df_common = data_file.parse(sheet_name='Основные данные')
 
         snapshot_dur = 6
         initial_offset = 3

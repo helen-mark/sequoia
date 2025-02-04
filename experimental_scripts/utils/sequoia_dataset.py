@@ -268,28 +268,7 @@ class SequoiaDataset:
 
         return self.fill_average_values(_dataset, df, longterm_col, shortterm_col, _snapshot)
 
-    def calc_external_factors(self, _dataset: pd.DataFrame, _snapshot: SnapShot):
-        inflation = read_excel('data/Инфляция.xlsx')
-        unemployment = read_excel('data/Безработица.xlsx')
-        bank_rate = read_excel('data/Ставка ЦБ.xlsx')
-
-        factor_num = 0
-        result = []
-        for factor_data in [inflation, unemployment, bank_rate]:
-            count = 0
-            factor_num += 1
-            factor_col = pd.DataFrame({'code': [], 'external_factor_'+str(factor_num): []})
-            for code in _dataset['code']:
-                _, snapshot_start, person_recruitment_date = self.prepare_sample(_dataset, _dataset, _snapshot, code)
-                values = factor_data.loc[factor_data['Год'] == snapshot_start.year].drop(columns='Год').values
-                value = values[0][snapshot_start.month-1]
-                factor_col.loc[count] = [code, value]
-                count += 1
-            result.append(factor_col)
-        return result
-
-
-    def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _full_dataset: pd.DataFrame, _snapshot: SnapShot):
+    def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot):
         snapshot_columns = []
 
         for sheet_name, feature_name in self.time_series_name_mapping.items():
@@ -301,28 +280,9 @@ class SequoiaDataset:
         ie = IrregularEvents(_input_file, 'time_since_salary_increase', 'Оплата труда', 'time_series')
         snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
 
-        snapshot_columns.extend(self.calc_external_factors(_dataset, _snapshot))
-
-        sheet_name = 'Структура компании'
-        df = read_excel(_input_file, sheet_name=sheet_name)
-        df = df.drop(columns='№')
-        df.columns = ['code', 'department', 'manager']
-        count = 0
-
-        for code in _dataset['code']:
-            sample, snapshot_start, _ = self.prepare_sample(df, _dataset, _snapshot, code)
-            manager_code = sample.iloc[0].values[-1]
-            manager_sample = _full_dataset.loc[_full_dataset['code'] == manager_code]
-            manager_term_date = manager_sample['termination_date'].item()
-
-            print("diff", snapshot_start - manager_term_date)
-
-            count += 1
-
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
 
-        # assing employee codes with current snapshot mark:
         _dataset = self.apply_snapshot_specific_codes(_dataset, _snapshot.num)
 
         return _dataset
@@ -331,6 +291,8 @@ class SequoiaDataset:
         # - company_seniority
         # - overall_experience
         # - license_expiration
+        # - income_avg
+        # - income_current
         # - leader_left
         # - has_meal
         # - has_insurance
@@ -417,13 +379,7 @@ class SequoiaDataset:
             raise ValueError(f'Invalid feature name passed to lookup(): {f_name}')
 
     def collect_main_data(self, _common_features: {}, _input_df: pd.DataFrame, _data_config: dict, _snapshot: SnapShot):
-        snapshot_dataset = pd.DataFrame()
-        full_dataset = pd.DataFrame()
-
-        for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
-            if col.name in _common_features:
-                new_col = col.values
-                self.fill_common_features(_common_features[col.name], full_dataset, new_col)
+        dataset = pd.DataFrame()
 
         for n, row in _input_df.iterrows():
             recr_date = row['Дата найма']
@@ -434,14 +390,14 @@ class SequoiaDataset:
                 _input_df = _input_df.drop(axis='index', labels=n)
 
         if _input_df.empty:
-            snapshot_dataset = None
-        else:
-            for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
-                if col.name in _common_features:
-                    new_col = col.values
-                    self.fill_common_features(_common_features[col.name], snapshot_dataset, new_col)
+            return None
 
-        return snapshot_dataset, full_dataset
+        for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
+            if col.name in _common_features:
+                new_col = col.values
+                self.fill_common_features(_common_features[col.name], dataset, new_col)
+
+        return dataset
 
     def run(self):
         data_file_path = os.path.join(self.data_dir, self.filename)
@@ -455,12 +411,12 @@ class SequoiaDataset:
         united_dataset = pd.DataFrame()
         while True:
             logging.info(f'Starting snapshot {snapshot.num}')
-            main_dataset, main_dataset_full = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
+            main_dataset = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
             if main_dataset is None:
                 logging.info(f'No data left for snapshot {snapshot.num}. Finishing process...')
                 break
             logging.debug(f'Formed main part of dataset: {main_dataset}')
-            full_snapshot_dataset = self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, main_dataset_full, snapshot)
+            full_snapshot_dataset = self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, snapshot)
             logging.debug(f'Final dataset for snapshot {snapshot.num}: {full_snapshot_dataset}')
             if snapshot.num == 0:
                 united_dataset = full_snapshot_dataset
@@ -468,7 +424,6 @@ class SequoiaDataset:
                 united_dataset = pd.concat([united_dataset, full_snapshot_dataset], axis=0)
             snapshot.num += 1
 
-        united_dataset = united_dataset.sort_values(by='code')  # sorting by code helps further splitting to train/val, keeping snapshots of each person in the same set to prevent data leakage
         united_dataset = united_dataset.reset_index()
         logging.debug(f'Final dataset: {united_dataset}')
         united_dataset.to_csv(self.output_path)

@@ -4,6 +4,8 @@ data_location:
   output_name: 'sequoia_dataset.csv'
 basic:
   snapshot_duration: 6  # months
+  snapshot_min_duration: 3
+  snapshot_initial_offset: 3
   date_format: '%Y.%m.%d'
 required_sheets:
   basic:

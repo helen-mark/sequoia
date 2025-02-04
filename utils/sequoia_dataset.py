@@ -335,7 +335,7 @@ class SequoiaDataset:
         # - has_meal
         # - has_insurance
 
-    def fill_common_features(self, _f_name, _dataset, _col):
+    def fill_column(self, _f_name, _dataset, _col):
         if _f_name == 'n':
             return
 
@@ -416,14 +416,18 @@ class SequoiaDataset:
         else:
             raise ValueError(f'Invalid feature name passed to lookup(): {f_name}')
 
+    def fill_common_features(self, _features_names: dict, _input_df: pd.DataFrame, _target_dataset: pd.DataFrame):
+        for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
+            if col.name in _features_names:
+                new_col = col.values
+                self.fill_column(_features_names[col.name], _target_dataset, new_col)
+        return _target_dataset
+
     def collect_main_data(self, _common_features: {}, _input_df: pd.DataFrame, _data_config: dict, _snapshot: SnapShot):
         snapshot_dataset = pd.DataFrame()
         full_dataset = pd.DataFrame()
 
-        for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
-            if col.name in _common_features:
-                new_col = col.values
-                self.fill_common_features(_common_features[col.name], full_dataset, new_col)
+        full_dataset = self.fill_common_features(_common_features, _input_df, full_dataset)
 
         for n, row in _input_df.iterrows():
             recr_date = row['Дата найма']
@@ -436,10 +440,7 @@ class SequoiaDataset:
         if _input_df.empty:
             snapshot_dataset = None
         else:
-            for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
-                if col.name in _common_features:
-                    new_col = col.values
-                    self.fill_common_features(_common_features[col.name], snapshot_dataset, new_col)
+            snapshot_dataset = self.fill_common_features(_common_features, _input_df, snapshot_dataset)
 
         return snapshot_dataset, full_dataset
 

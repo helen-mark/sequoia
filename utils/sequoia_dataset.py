@@ -225,13 +225,13 @@ class SequoiaDataset:
 
         snapshot_start = self.calc_individual_snapshot_start(_snapshot, person_recruitment_date,
                                                              person_termination_date)
-        return sample, snapshot_start, person_recruitment_date
+        return sample, snapshot_start, person_recruitment_date, person_termination_date
 
     def fill_average_values(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _snapshot: SnapShot):
         count = 0
 
         for code in _dataset['code']:
-            sample, snapshot_start, _ = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
+            sample, snapshot_start, _, _ = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
 
             avg_6m = self.calc_numerical_average(sample, 6, snapshot_start)
             avg_2m = self.calc_numerical_average(sample, 2, snapshot_start)
@@ -247,7 +247,7 @@ class SequoiaDataset:
         count = 0
 
         for code in _dataset['code']:
-            _, snapshot_start, person_recruitment_date = self.prepare_sample(_events.events, _dataset, _snapshot, code)
+            _, snapshot_start, person_recruitment_date, _ = self.prepare_sample(_events.events, _dataset, _snapshot, code)
             dates = _events.events_dates(code)
 
             time_since_salary_increase = self.calc_time_since_latest_event(dates, snapshot_start, person_recruitment_date)
@@ -280,7 +280,7 @@ class SequoiaDataset:
             factor_num += 1
             factor_col = pd.DataFrame({'code': [], 'external_factor_'+str(factor_num): []})
             for code in _dataset['code']:
-                _, snapshot_start, person_recruitment_date = self.prepare_sample(_dataset, _dataset, _snapshot, code)
+                _, snapshot_start, person_recruitment_date, _ = self.prepare_sample(_dataset, _dataset, _snapshot, code)
                 values = factor_data.loc[factor_data['Год'] == snapshot_start.year].drop(columns='Год').values
                 value = values[0][snapshot_start.month-1]
                 factor_col.loc[count] = [code, value]
@@ -289,11 +289,34 @@ class SequoiaDataset:
         return result
 
 
+    def process_continuous_features(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot, _sheet_name: str, _feature_name: str):
+        data_file = pd.ExcelFile(_input_file)
+        df_common = data_file.parse(sheet_name=_sheet_name)
+        feature_col = pd.DataFrame({'code': [], _feature_name: []})
+        count = 0
+        print('Continuous feature:', _feature_name)
+        for code in _dataset['code']:
+            _, snapshot_start, person_recruitment_date, person_termination_date = self.prepare_sample(_dataset, _dataset, _snapshot, code)
+            value = df_common.loc[df_common['code'] == code][_feature_name]
+            print('before', value)
+            value -= (person_termination_date - snapshot_start).year
+            print('after', value)
+            feature_col.loc[count] = [code, value]
+            count += 1
+
+        return [feature_col]
+
+
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _full_dataset: pd.DataFrame, _snapshot: SnapShot):
         snapshot_columns = []
 
         for sheet_name, feature_name in self.time_series_name_mapping.items():
             snapshot_columns.extend(self.process_timeseries(_input_file, _dataset, _snapshot, sheet_name, feature_name))
+
+        # age, overall experience, company seniority:
+        for feature_name in ['age', 'seniority', 'overall_experience']:
+            snapshot_columns.extend(
+                self.process_continuous_features(_input_file, _dataset, _snapshot, 'Основные данные', feature_name))
 
         ie = IrregularEvents(_input_file, 'days_since_promotion', 'Дата повышения', 'event_list')
         snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
@@ -310,7 +333,7 @@ class SequoiaDataset:
         count = 0
 
         for code in _dataset['code']:
-            sample, snapshot_start, _ = self.prepare_sample(df, _dataset, _snapshot, code)
+            sample, snapshot_start, _, _ = self.prepare_sample(df, _dataset, _snapshot, code)
             manager_code = sample.iloc[0].values[-1]
             manager_sample = _full_dataset.loc[_full_dataset['code'] == manager_code]
             manager_term_date = manager_sample['termination_date'].item()

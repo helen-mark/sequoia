@@ -20,7 +20,8 @@ def encode_numerical_feature(feature: K.Input, name: str, dataset: tf.data.Datas
     feature_ds = dataset.map(lambda x, y: x[name])
     feature_ds = feature_ds.map(lambda x: tf.expand_dims(x, -1))
 
-    normalizer.adapt(feature_ds)
+    normalizer.adapt(feature_ds)  # this way normalization layer learns mean and deviation and stores them as it's weights
+                                  # which don't change during training
 
     # Normalize the input feature
     encoded_feature = normalizer(feature)

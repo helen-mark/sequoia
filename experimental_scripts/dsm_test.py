@@ -15,14 +15,20 @@ from utils.custom_metric import calc_metric
 
 def preprocess(_features: pd.DataFrame):
     return Preprocessor().fit_transform(_features,
-                                            cat_feats=['department', 'nationality', 'gender', 'family_status'],
+                                            cat_feats=['department', 'citizenship', 'gender', 'family_status'],
                                             num_feats=[
                                                         "age",
-                                                        "days_before_salary_increase",
-                                                        "salary_increase",
-                                                        "overtime",
-                                                        "salary_6m_average",
-                                                        "salary_cur"
+                                                        "vacation_days_shortterm",
+                                                        "vacation_days_longterm",
+                                                        "income_shortterm",
+                                                        "income_longterm",
+                                                        "overtime_shortterm",
+                                                        "overtime_longterm",
+                                                        "absenteeism_shortterm",
+                                                        "absenteeism_longterm"
+                                                        # "external_factor_1",
+                                                        # "external_factor_2",
+                                                        # "external_factor_3"
                                                         ]
                                             )
 
@@ -44,43 +50,44 @@ def fit_survival_machine(_features: pd.DataFrame, _outcomes: pd.DataFrame):
 
 
 
-def test_survival_machine(_model: auton_survival.models.dsm.DeepSurvivalMachines, _dataset: pd.DataFrame):
-    _dataset = _dataset.transpose()
-    feats = _dataset[:-2].transpose()
-    outs = _dataset[-2:].transpose()
-    feats = preprocess(feats)
+def test_survival_machine(_model: auton_survival.models.dsm.DeepSurvivalMachines, _feats, _outs):
+    feats = preprocess(_feats)
     times = []
     true_events = []
     predictions = []
-    for t in outs.time:
+    for t in _outs.time:
         times.append(t)
-    for e in outs.event:
+    for e in _outs.event:
         true_events.append(e)
     for n, f in enumerate(feats.transpose()):
-        print(feats.iloc[[n]], times[n])
         pred = _model.predict_risk(feats.iloc[[n]], times=[times[n]])  # predict risk of event at ground-truth event time
         predictions.append(pred[0][0])
 
-    calc_metric(predictions, true_events, 0.2)
+    calc_metric(predictions, true_events, 0.5)
 
 
 
 def prepare_dataset(_data_path: str):
-    dataset = read_csv(config["data_path"], delimiter=',')
-    dataset = dataset.transpose()
-    feats = dataset[:-2].transpose()
-    outs = dataset[-2:].transpose()
-    return feats, outs
+    dataset = read_csv(_data_path, delimiter=',')
+    val_dataframe = dataset.sample(frac=0.2, random_state=133)
+    train_dataframe = dataset.drop(val_dataframe.index)
+
+    dataset_t = train_dataframe.transpose()
+    feats_t = dataset_t[:-2].transpose()
+    outs_t = dataset_t[-2:].transpose()
+
+    dataset_v = val_dataframe.transpose()
+    feats_v = dataset_v[:-2].transpose()
+    outs_v = dataset_v[-2:].transpose()
+    return feats_t, outs_t, feats_v, outs_v
 
 
 if __name__ == '__main__':
     config = {
-        "data_path": "data/dataset-nn-small-dsm.csv",  # dataset contains columns "event" and "time"
-        "data2_path": "data/october-works-dsm.csv"
+        "data2_path": "data/sequoia_dataset_dsm.csv"
     }
 
-    features, outcomes = prepare_dataset(config["data2_path"])
-    final_model = fit_survival_machine(features, outcomes)
+    features_t, outcomes_t, features_v, outcomes_v = prepare_dataset(config["data2_path"])
+    final_model = fit_survival_machine(features_t, outcomes_t)
 
-    test_dataset = read_csv(config["data_path"], delimiter=",")
-    test_survival_machine(final_model, test_dataset)
+    test_survival_machine(final_model, features_v, outcomes_v)

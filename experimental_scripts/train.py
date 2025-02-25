@@ -17,7 +17,7 @@ from sklearn.metrics import r2_score, precision_score, recall_score, f1_score
 from sklearn.model_selection import train_test_split
 
 
-def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _num_iters):
+def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
     model = xgb.XGBClassifier(objective="binary:logistic", random_state=42, early_stopping_rounds=15, eval_set=[(_x_test, _y_test)])
     best_precision = 0.
     best_model = model
@@ -25,7 +25,7 @@ def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _num_iters):
 
     print(f"Fitting XGBoost classifier...")
     for iter in range(_num_iters):
-        model.fit(_x_train, _y_train, eval_set=[(_x_test, _y_test)], verbose=False)
+        model.fit(_x_train, _y_train, eval_set=[(_x_test, _y_test)], sample_weight=_sample_weight, verbose=False)
         predictions = model.predict(_x_test)
 
         test_result['Precision'] = precision_score(_y_test, predictions)
@@ -52,10 +52,14 @@ def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _num_iters):
     print(l)
     print(f"XGBoost test result: R2 score = {test_result['R2']}\nRecall = {test_result['Recall']}\nPrecision = {test_result['Precision']}\nF1 = {test_result['F1']}")
 
+    feature_importance = best_model.feature_importances_
+    feature_importance_df = pd.DataFrame({'Feature': _x_train.columns, 'Importance': feature_importance})
+    print(feature_importance_df)
+
     return best_model
 
 
-def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _num_iters):
+def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
     model = RandomForestRegressor(n_estimators=10, max_features='sqrt')
     best_precision = 0.
     best_model = model
@@ -64,7 +68,7 @@ def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _num_iters):
     test_result = {}
     print(f"Fitting Random Forest...")
     for iter in range(_num_iters):
-        model.fit(_x_train, _y_train)
+        model.fit(_x_train, _y_train, sample_weight=_sample_weight)
         print("\nModel attr after fitting:", model.__dict__)
         predictions = model.predict(_x_test)
 
@@ -94,24 +98,24 @@ def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _num_iters):
     return best_model
 
 
-def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _num_iters):
-    model = RandomForestClassifier(n_estimators=100, max_features='sqrt')
+def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
+    model = RandomForestClassifier(n_estimators=100)
     best_precision = 0.
     best_model = model
 
-    print("Model attr:", model.__dict__)
     test_result = {}
 
     print(f"Fitting Random Forest classifier...")
     for iter in range(_num_iters):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            model.fit(_x_train, _y_train)
-        print("\nModel attr after fitting:", model.__dict__)
-        print("\nModel get_param:", model.get_params(deep=True))
+            model.fit(_x_train, _y_train, sample_weight=_sample_weight)
         predictions = model.predict(_x_test)
 
         test_result['Precision'] = precision_score(_y_test, predictions)
+        test_result['Recall'] = recall_score(_y_test, predictions)
+        test_result['F1'] = f1_score(_y_test, predictions)
+
         if test_result['Precision'] > best_precision:
             best_precision = test_result['Precision']
             best_model = model
@@ -175,15 +179,15 @@ def train_linear_regression(_x_train, _y_train, _x_test, _y_test, _num_iters):
     return best_model
 
 
-def train(_x_train, _y_train, _x_test, _y_test, _model_name, _num_iters, _maximize):
+def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _model_name, _num_iters, _maximize):
     if _model_name == 'XGBoostClassifier':
-        model = train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _num_iters)
+        model = train_xgboost_classisier(_x_train, _y_train, _x_test, _sample_weight, _y_test, _num_iters)
     elif _model_name == 'RandomForestRegressor':
-        model = train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _num_iters)
+        model = train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
     elif _model_name == 'LinearRegression':
         model = train_linear_regression(_x_train, _y_train, _x_test, _y_test, _num_iters)
     elif _model_name == "RandomForestClassifier":
-        model = train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _num_iters)
+        model = train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
     else:
         print("Model name error: this model is not implemented yet!")
         return
@@ -204,9 +208,17 @@ def prepare_dataset(_dataset_path: str, _test_split: float, _normalize: bool):
     trg = dataset[target_idx:]
     trn = dataset[:target_idx]
 
+    # val_size = 2000
+    # trn = trn.transpose()
+    # trg = trg.transpose()
+    # x_train = trn[val_size:]
+    # x_test = trn[:val_size]
+    # y_train = trg[val_size:]
+    # y_test = trg[:val_size]
+
     x_train, x_test, y_train, y_test = train_test_split(trn.transpose(), trg.transpose(), test_size=_test_split)
 
-    if _normalize:
+    if _normalize:  # normalization is NOT needed for decision trees!
         x_train = normalize(x_train)
         x_test  = normalize(x_test)
 
@@ -266,15 +278,25 @@ if __name__ == '__main__':
         'normalize': False,  # normalize input values or not
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/october_works.csv'
+        'dataset_src': 'data/sequoia_dataset.csv'
     }
 
     # Load the dataset from file and split it to train/test:
     x_train, x_test, y_train, y_test = prepare_dataset(config['dataset_src'], config['test_split'], config['normalize'])
 
+    w_0, w_1 = 0, 0
+    for i in y_train.values:
+        w_0 += 1 - i
+        w_1 += i
+    sample_weight = np.array([w_0.item() if i == 1 else w_1.item() for i in y_train.values])
+    # sample_weight = np.array([1 if i == 1 else 1 for i in y_train.values])
+
+    print(sample_weight)
     # Train model and save it:
-    trained_model = train(x_train, y_train, x_test, y_test, config['model'], config['num_iters'], config['maximize'])
-    show_decision_tree(trained_model)
+    trained_model = train(x_train, y_train, x_test, y_test, sample_weight, config['model'], config['num_iters'], config['maximize'])
+
+    #if config['model'] == 'RandomForestClassifier':
+    #    show_decision_tree(trained_model)
 
     with open('model.pkl', 'wb') as f:
        print("Saving model..")

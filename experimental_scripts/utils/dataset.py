@@ -81,69 +81,123 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
     # Categorical features encoded as integers
     gender = K.Input(shape=(1,), name="gender", dtype="int64")
     department = K.Input(shape=(1,), name="department", dtype="int64")
-    nationality = K.Input(shape=(1,), name="nationality", dtype="int64")
-    family_status = K.Input(shape=(1,), name="family_status", dtype="int64")
+    nationality = K.Input(shape=(1,), name="citizenship", dtype="int64")
+    # family_status = K.Input(shape=(1,), name="family_status", dtype="int64")
+    # children = K.Input(shape=(1,), name="children")
+    # education = K.Input(shape=(1,), name="education")
 
     # Numerical features
     age = K.Input(shape=(1,), name="age")
     seniority = K.Input(shape=(1,), name="seniority")
-    # vacation_days = K.Input(shape=(1,), name="vacation_days")
-    days_before_salary_increase = K.Input(shape=(1,), name="days_before_salary_increase")
-    salary_increase = K.Input(shape=(1,), name="salary_increase")
-    overtime = K.Input(shape=(1,), name="overtime")
-    # km_to_work = K.Input(shape=(1,), name="km_to_work")
-    salary_6m_average = K.Input(shape=(1,), name="salary_6m_average")
-    salary_cur = K.Input(shape=(1,), name="salary_cur")
+    vacation_days_s = K.Input(shape=(1,), name="vacation_days_shortterm")
+    vacation_days_l = K.Input(shape=(1,), name="vacation_days_longterm")
+    external_factor_1 = K.Input(shape=(1,), name="external_factor_1")
+    external_factor_2 = K.Input(shape=(1,), name="external_factor_2")
+    external_factor_3 = K.Input(shape=(1,), name="external_factor_3")
+    # days_before_salary_increase = K.Input(shape=(1,), name="days_before_salary_increase")
+    # salary_increase = K.Input(shape=(1,), name="salary_increase")
+    overtime_s = K.Input(shape=(1,), name="overtime_shortterm")
+    overtime_l = K.Input(shape=(1,), name="overtime_longterm")
+    absenteeism_s = K.Input(shape=(1,), name="absenteeism_shortterm")
+    absenteeism_l = K.Input(shape=(1,), name="absenteeism_longterm")
 
-    all_inputs = [
-        department,
-        seniority,
-        nationality,
-        age,
-        gender,
-        # vacation_days,
-        days_before_salary_increase,
-        salary_increase,
-        overtime,
-        family_status,
-        # km_to_work,
-        salary_6m_average,
-        salary_cur
-    ]
+    # km_to_work = K.Input(shape=(1,), name="km_to_work")
+    salary_6m_average = K.Input(shape=(1,), name="income_longterm")
+    salary_cur = K.Input(shape=(1,), name="income_shortterm")
+
 
     # Integer categorical features
     gender_encoded = encode_categorical_feature(gender, "gender", _train_ds, False)
     department_encoded = encode_categorical_feature(department, "department", _train_ds, False)
-    nationality_encoded = encode_categorical_feature(nationality, "nationality", _train_ds, False)
-    family_status_encoded = encode_categorical_feature(family_status, "family_status", _train_ds, False)
+    nationality_encoded = encode_categorical_feature(nationality, "citizenship", _train_ds, False)
+    #family_status_encoded = encode_categorical_feature(family_status, "family_status", _train_ds, False)
+    #education_encoded = encode_categorical_feature(education, 'education', _train_ds, False)
+    #children_encoded = encode_categorical_feature(children, 'children', _train_ds, False)
 
     # Numerical features
     age_encoded = encode_numerical_feature(age, "age", _train_ds)
     seniority_encoded = encode_numerical_feature(seniority, "seniority", _train_ds)
-    # vacation_days_encoded = encode_numerical_feature(vacation_days, "vacation_days", train_ds)
-    days_before_salary_increase_encoded = encode_numerical_feature(days_before_salary_increase,
-                                                                   "days_before_salary_increase", _train_ds)
-    salary_increase_encoded = encode_numerical_feature(salary_increase, "salary_increase", _train_ds)
-    overtime_encoded = encode_numerical_feature(overtime, "overtime", _train_ds)
-    # km_to_work_encoded = encode_numerical_feature(km_to_work, "km_to_work", train_ds)
-    salary_6m_average_encoded = encode_numerical_feature(salary_6m_average, "salary_6m_average", _train_ds)
-    salary_cur_encoded = encode_numerical_feature(salary_cur, "salary_cur", _train_ds)
+    vacation_days_s_encoded = encode_numerical_feature(vacation_days_s, "vacation_days_shortterm", _train_ds)
+    vacation_days_l_encoded = encode_numerical_feature(vacation_days_s, "vacation_days_longterm", _train_ds)
+    external_factor_1_encoded = encode_numerical_feature(vacation_days_s, "external_factor_1", _train_ds)
+    external_factor_2_encoded = encode_numerical_feature(vacation_days_s, "external_factor_2", _train_ds)
+    external_factor_3_encoded = encode_numerical_feature(vacation_days_s, "external_factor_3", _train_ds)
 
-    all_features = K.layers.concatenate(
+    # days_before_salary_increase_encoded = encode_numerical_feature(days_before_salary_increase,
+    #                                                               "days_before_salary_increase", _train_ds)
+    #salary_increase_encoded = encode_numerical_feature(salary_increase, "salary_increase", _train_ds)
+    overtime_s_encoded = encode_numerical_feature(overtime_s, "overtime_shortterm", _train_ds)
+    overtime_l_encoded = encode_numerical_feature(overtime_l, "overtime_longterm", _train_ds)
+    absenteeism_s_encoded = encode_numerical_feature(absenteeism_s, "absenteeism_shortterm", _train_ds)
+    absenteeism_l_encoded = encode_numerical_feature(absenteeism_l, "absenteeism_longterm", _train_ds)
+
+    # km_to_work_encoded = encode_numerical_feature(km_to_work, "km_to_work", train_ds)
+    salary_6m_average_encoded = encode_numerical_feature(salary_6m_average, "income_longterm", _train_ds)
+    salary_cur_encoded = encode_numerical_feature(salary_cur, "income_shortterm", _train_ds)
+
+
+    all_inputs_nonreg = [
+        department,
+        seniority,
+        nationality,
+        age,
+      #  children,
+        gender,
+      #  education,
+        vacation_days_s,
+        vacation_days_l,
+        #days_before_salary_increase,
+        #salary_increase,
+        overtime_s,
+        overtime_l,
+        absenteeism_s,
+        absenteeism_l,
+       # family_status,
+        # km_to_work,
+        salary_6m_average,
+        salary_cur,
+        external_factor_1,
+        external_factor_2,
+        external_factor_3
+    ]
+
+    all_inputs_reg = [
+        external_factor_1,
+        external_factor_2,
+        external_factor_3
+    ]
+
+    all_features_nonreg = K.layers.concatenate(
         [
             department_encoded,
             seniority_encoded,
             nationality_encoded,
             age_encoded,
             gender_encoded,
-            # vacation_days_encoded,
-            days_before_salary_increase_encoded,
-            salary_increase_encoded,
-            overtime_encoded,
-            family_status_encoded,
-            # km_to_work_encoded,
+            vacation_days_s_encoded,
+            vacation_days_l_encoded,
+            overtime_s_encoded,
+            overtime_l_encoded,
+            absenteeism_s_encoded,
+            absenteeism_l_encoded,
+            #       family_status_encoded,
+     #       children_encoded,
+     #      education_encoded,
             salary_6m_average_encoded,
-            salary_cur_encoded
+            salary_cur_encoded,
+            #days_before_salary_increase_encoded,
+            #salary_increase_encoded,
+
+            # km_to_work_encoded,
+            external_factor_1_encoded,
+            external_factor_2_encoded,
+            external_factor_3_encoded
         ]
     )
-    return all_features, all_inputs
+    all_features_reg = K.layers.concatenate([
+        external_factor_1_encoded,
+        external_factor_2_encoded,
+        external_factor_3_encoded]
+    )
+
+    return all_features_reg, all_features_nonreg, all_inputs_reg, all_inputs_nonreg

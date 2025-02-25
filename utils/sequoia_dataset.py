@@ -1,4 +1,5 @@
 import os
+import random
 
 from datetime import datetime, date
 import pandas as pd
@@ -81,8 +82,14 @@ class SequoiaDataset:
         self.data_config = _data_config
         self.dataset_config = _dataset_config
         self.snapshot_duration = _data_config['basic']['snapshot_duration']
+        self.max_snapshots_number = _data_config['basic']['max_snapshots_number']
         self.snapshot_initial_offset = _data_config['basic']['snapshot_initial_offset']
         self.snapshot_min_dur = _data_config['basic']['snapshot_min_duration']
+        self.min_window = _data_config['basic']['min_window']
+        self.random_snapshot = _data_config['basic']['random_snapshot']  # make random snapshot offset for each person
+
+        self.data_load_date = _data_config['basic']['data_load_date']
+        self.data_begin_date = self.str_to_datetime(_data_config['basic']['data_begin_date'])
 
         self.data_dir = self.data_config['data_location']['data_path']
         self.filename = self.data_config['data_location']['file_name']
@@ -91,13 +98,17 @@ class SequoiaDataset:
         # df2.merge(df1, how='union', on='ФИО')
         self.main_features = self.data_config['required_sheets']['basic']['features']
         self.common_features_name_mapping = {}
+        self.continuous_features_names_mapping = {}
         self.specific_features = []
 
         # collect feature input names which are common for all snapshots:
         for f_name in self.main_features.keys():
             f = self.main_features[f_name]
-            if 'kind' in f.keys() and f['kind'] == 'common':
-                self.common_features_name_mapping[f['name']] = f['name_out']
+            if 'kind' in f.keys():
+                if f['kind'] == 'common':
+                    self.common_features_name_mapping[f['name']] = f['name_out']
+                elif f['kind'] == 'continuous':
+                    self.continuous_features_names_mapping[f['name']] = f['name_out']
             else:
                 self.specific_features.append(f['name'])
 
@@ -138,10 +149,10 @@ class SequoiaDataset:
 
     @staticmethod
     def set_column_labels_as_dates(_input_df: pd.DataFrame):
-        year = 2024
         new_columns = ['code']
-        for i in range(1, 13):
-            new_columns.append(date(year, i, 1))
+        for year in [2022, 2023, 2024]:
+            for i in range(1, 13):
+                new_columns.append(date(year, i, 1))
         _input_df.columns = new_columns
         return _input_df
 
@@ -149,20 +160,28 @@ class SequoiaDataset:
     def calc_numerical_average(self, _values_per_month: pd.DataFrame, _period_months: int, _snapshot_start: datetime.date):
         assert not _values_per_month.empty
         assert _period_months > 0
-
         _values_per_month = _values_per_month[_values_per_month.columns[::-1]]  # this operation reverses order of columns
-
         values_sum = 0.
         count = 0
+        tot = 0
         for date, val in _values_per_month.items():  # same order of columns like in xlsx table
             if date <= _snapshot_start:
-                values_sum += val
+                tot += 1
+                val = val.item()
+                if val is None or val == np.NaN or str(val) in ['nan', 'NaN']:
+                    continue
+                val_item = str(val).split('\xa0')
+                val_corr = val_item[0] + val_item[1] if len(val_item) > 1 else val_item[0]
+                val_corr = float(val_corr.replace(',', '.'))
+                # print("Val corr:", val_corr)
+                values_sum += val_corr
                 count += 1
-                if count == _period_months:
+                if tot == int(_period_months):
                     break
         if count == 0:
             return None
         avg = values_sum / count
+        # print("avg:", avg)
         return avg
 
     def calc_salary_current(self, _salary_per_month: pd.DataFrame, _snapshot_start: datetime.date):
@@ -191,6 +210,13 @@ class SequoiaDataset:
         pass
 
     def calc_individual_snapshot_start(self, _snapshot: SnapShot, _recruitment_date: date, _term_date: date):
+        if self.random_snapshot:  # make random offset
+            start_date = max(_recruitment_date, self.data_begin_date)
+            empl_period = (_term_date - start_date).days / 30
+            individual_max_initial_offset = int(empl_period - _snapshot.min_duration)
+            _snapshot.initial_offset = random.randint(self.snapshot_initial_offset, individual_max_initial_offset)
+            # print(f"init offset between {self.snapshot_initial_offset} and {individual_max_initial_offset} = {_snapshot.initial_offset}")
+
         offset_months = _snapshot.num * _snapshot.duration + _snapshot.initial_offset
         offset_years = int(np.floor(offset_months / 12))
         offset_months = offset_months % 12
@@ -199,8 +225,8 @@ class SequoiaDataset:
         if month <= 0:
             month = 12 + month
             year -= 1
-        if year < _recruitment_date.year or (year == _recruitment_date.year and month < _recruitment_date.month + 2):
-            return None
+        # if year < _recruitment_date.year or (year == _recruitment_date.year and month < _recruitment_date.month + _snapshot.min_duration):
+        #    return None
         snapshot_start = date(year, month, 1)
         return snapshot_start
 
@@ -231,15 +257,24 @@ class SequoiaDataset:
         count = 0
 
         for code in _dataset['code']:
-            sample, snapshot_start, _, _ = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
+            sample, snapshot_start, recr_date, dism_date = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
+            if not sample.empty and snapshot_start is not None:
+                # print("Recr and dism dates:", recr_date, dism_date)
+                # print("Snapshot start:", snapshot_start)
+                longterm_period = min(_snapshot.duration, (snapshot_start - recr_date).days / 30)
+                shortterm_period = min(self.min_window, (snapshot_start - recr_date).days / 30)
+                # print("Longterm period:", longterm_period, 'shortterm:', shortterm_period)
 
-            avg_6m = self.calc_numerical_average(sample, 6, snapshot_start)
-            avg_2m = self.calc_numerical_average(sample, 2, snapshot_start)
-            _longterm_avg.loc[count] = [code, avg_6m.item()]
-            _shortterm_avg.loc[count] = [code, avg_2m.item()]
+                avg_6m = self.calc_numerical_average(sample, longterm_period, snapshot_start)
+                avg_2m = self.calc_numerical_average(sample, shortterm_period, snapshot_start)
+                _longterm_avg.loc[count] = [code, avg_6m]
+                _shortterm_avg.loc[count] = [code, avg_2m]
+            else:
+                _longterm_avg.loc[count] = [code, None]
+                _shortterm_avg.loc[count] = [code, None]
+
 
             count += 1
-
         return _shortterm_avg, _longterm_avg
 
     def calc_time_since_events(self, _events: IrregularEvents, _dataset: pd.DataFrame, _snapshot: SnapShot):
@@ -259,8 +294,7 @@ class SequoiaDataset:
 
     def process_timeseries(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot, _sheet_name: str, _feature_name: str):
         df = read_excel(_input_file, sheet_name=_sheet_name)
-
-        df = df.drop(columns='№')
+        df = df.drop(columns='Full name')
         df = self.set_column_labels_as_dates(df)
 
         longterm_col = pd.DataFrame({'code': [], _feature_name + '_longterm': []})
@@ -292,15 +326,15 @@ class SequoiaDataset:
     def process_continuous_features(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot, _sheet_name: str, _feature_name: str):
         data_file = pd.ExcelFile(_input_file)
         df_common = data_file.parse(sheet_name=_sheet_name)
-        feature_col = pd.DataFrame({'code': [], _feature_name: []})
+        feature_col = pd.DataFrame({'code': [], self.continuous_features_names_mapping[_feature_name]: []})
         count = 0
         print('Continuous feature:', _feature_name)
         for code in _dataset['code']:
             _, snapshot_start, person_recruitment_date, person_termination_date = self.prepare_sample(_dataset, _dataset, _snapshot, code)
-            value = df_common.loc[df_common['code'] == code][_feature_name]
-            print('before', value)
-            value -= (person_termination_date - snapshot_start).year
-            print('after', value)
+            value = df_common.loc[df_common['Code'] == code][_feature_name]
+            value = value.replace(',', '.', regex=True).astype(float).item()
+            value = abs(value)  # there are negative company seniority values in the data
+            value -= (person_termination_date - snapshot_start).days / 365
             feature_col.loc[count] = [code, value]
             count += 1
 
@@ -311,36 +345,37 @@ class SequoiaDataset:
         snapshot_columns = []
 
         for sheet_name, feature_name in self.time_series_name_mapping.items():
+            print("process timeseries:", feature_name)
             snapshot_columns.extend(self.process_timeseries(_input_file, _dataset, _snapshot, sheet_name, feature_name))
 
         # age, overall experience, company seniority:
-        for feature_name in ['age', 'seniority', 'overall_experience']:
+        for feature_name in ['Age', 'Seniority']:  # , 'overall_experience']:
             snapshot_columns.extend(
                 self.process_continuous_features(_input_file, _dataset, _snapshot, 'Основные данные', feature_name))
 
-        ie = IrregularEvents(_input_file, 'days_since_promotion', 'Дата повышения', 'event_list')
-        snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
+        # ie = IrregularEvents(_input_file, 'days_since_promotion', 'Дата повышения', 'event_list')
+        # snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
 
-        ie = IrregularEvents(_input_file, 'time_since_salary_increase', 'Оплата труда', 'time_series')
-        snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
+        # ie = IrregularEvents(_input_file, 'time_since_salary_increase', 'Оплата труда', 'time_series')
+        # snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
 
         snapshot_columns.extend(self.calc_external_factors(_dataset, _snapshot))
 
-        sheet_name = 'Структура компании'
-        df = read_excel(_input_file, sheet_name=sheet_name)
-        df = df.drop(columns='№')
-        df.columns = ['code', 'department', 'manager']
-        count = 0
-
-        for code in _dataset['code']:
-            sample, snapshot_start, _, _ = self.prepare_sample(df, _dataset, _snapshot, code)
-            manager_code = sample.iloc[0].values[-1]
-            manager_sample = _full_dataset.loc[_full_dataset['code'] == manager_code]
-            manager_term_date = manager_sample['termination_date'].item()
-
-            print("diff", snapshot_start - manager_term_date)
-
-            count += 1
+        # sheet_name = 'Структура компании'
+        # df = read_excel(_input_file, sheet_name=sheet_name)
+        # df = df.drop(columns='№')
+        # df.columns = ['code', 'department', 'manager']
+        # count = 0
+        #
+        # for code in _dataset['code']:
+        #     sample, snapshot_start, _, _ = self.prepare_sample(df, _dataset, _snapshot, code)
+        #     manager_code = sample.iloc[0].values[-1]
+        #     manager_sample = _full_dataset.loc[_full_dataset['code'] == manager_code]
+        #     manager_term_date = manager_sample['termination_date'].item()
+        #
+        #     print("diff", snapshot_start - manager_term_date)
+        #
+        #     count += 1
 
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
@@ -349,14 +384,6 @@ class SequoiaDataset:
         _dataset = self.apply_snapshot_specific_codes(_dataset, _snapshot.num)
 
         return _dataset
-
-        # - age
-        # - company_seniority
-        # - overall_experience
-        # - license_expiration
-        # - leader_left
-        # - has_meal
-        # - has_insurance
 
     def fill_column(self, _f_name, _dataset, _col):
         if _f_name == 'n':
@@ -371,15 +398,18 @@ class SequoiaDataset:
     def lookup(self, f_name, key):
         female = ['ж', 'Ж', 'жен', 'Жен', 'женский', 'Женский']
         male = ['м', 'М', 'муж', 'Муж', 'мужской', 'Мужской']
-        russian = ['Россия', 'россия', 'Российское', 'российское']
-        not_russian = ['иное', 'НЕ РФ', 'НЕ Рф']
-        interm_education = ['среднее']
-        high_education = ['высшее']
-        spec_education = ['среднее специальное']
+        russian = ['Россия', 'россия', 'Российское', 'российское', 'резидент', 'Резидент']
+        not_russian = ['иное', 'НЕ РФ', 'НЕ Рф', 'Не резидент', 'не резидент']
+        interm_education = ['среднее', 'Среднее', 'Без образования']
+        high_education = ['высшее', 'Высшее']
+        spec_education = ['среднее специальное', 'Среднее специальное']
         married = ['женат', 'замужем', 'в браке']
         single = ['не женат', 'не замужем', 'не в браке']
-        logistics = ['логистика']
-        main_dept = ['основное производство', 'основной']
+        office = ['office', 'accountant']
+        sales = ['sales']
+        blue_collar = ['blue collar']
+        class_3_1 = ['Подкласс 3.1 класса условий труда "вредный"']
+        class_2 = ['Допустимый, подкласс условий труда 2']
 
         if f_name == 'code':
             return int(key)
@@ -404,6 +434,8 @@ class SequoiaDataset:
                 return 1
             elif key in spec_education:
                 return 2
+            elif key is None or str(key) == 'nan':
+                return 3  # imputation
             else:
                 raise ValueError(f'Invalid education format: {key}')
         elif f_name == 'family_status':
@@ -420,10 +452,12 @@ class SequoiaDataset:
         elif f_name == 'to_work_travel_time':
             return float(key)
         elif f_name == 'department':
-            if key in logistics:
+            if key in office:
                 return 1
-            elif key in main_dept:
+            elif key in sales:
                 return 0
+            elif key in blue_collar:
+                return 2
             else:
                 raise ValueError(f'Invalid department format: {key}')
         elif f_name == 'n_employers':
@@ -431,11 +465,20 @@ class SequoiaDataset:
             #    raise TypeError(f'Unexpected n_employers value: {key}')
             return int(key)
         elif f_name == 'occupational_hazards':
-            #if not key.isdigit():
-            #    raise TypeError(f'Unexpected hazards value: {key}')
-            return int(key)
+            if key in class_3_1:
+                return 0
+            elif key in class_2:
+                return 1
+            elif key is None:
+                return 3  # imputation
+            else:
+                raise ValueError(f'Invalid hazard format: {key}')
         elif f_name in ['recruitment_date', 'termination_date']:
+            if key is None or str(key) == 'nan':  # no date of dismissal
+                return None
             return self.str_to_datetime(str(key))
+        elif f_name == 'status':
+            return 1 - int(key)
         else:
             raise ValueError(f'Invalid feature name passed to lookup(): {f_name}')
 
@@ -443,7 +486,8 @@ class SequoiaDataset:
         for n, col in _input_df.transpose().iterrows():  # transpose dataframe to iterate over columns
             if col.name in _features_names:
                 new_col = col.values
-                self.fill_column(_features_names[col.name], _target_dataset, new_col)
+                feature_name = _features_names[col.name]
+                self.fill_column(feature_name, _target_dataset, new_col)
         return _target_dataset
 
     def collect_main_data(self, _common_features: {}, _input_df: pd.DataFrame, _data_config: dict, _snapshot: SnapShot):
@@ -453,17 +497,33 @@ class SequoiaDataset:
         full_dataset = self.fill_common_features(_common_features, _input_df, full_dataset)
 
         for n, row in _input_df.iterrows():
-            recr_date = row['Дата найма']
-            term_date = row['Дата увольнения']
+            recr_date = row['Hire date']
+            term_date = row['Date of dismissal']
+            if term_date is None or str(term_date) == 'nan':
+                row['Date of dismissal'] = self.data_load_date
+                term_date = row['Date of dismissal']
+                _input_df.loc[n] = row
             empl_period = (self.str_to_datetime(term_date)-self.str_to_datetime(recr_date)).days / 30
             # remove sample if it has no data for current time snapshot:
-            if empl_period - _snapshot.min_duration < _snapshot.total_offset():
+
+            if empl_period - _snapshot.total_offset() <= _snapshot.min_duration:
+                # print(empl_period, row['Seniority'])
                 _input_df = _input_df.drop(axis='index', labels=n)
+            elif (self.str_to_datetime(term_date) - self.data_begin_date).days / 30 - _snapshot.total_offset() <= _snapshot.min_duration:
+                # print(term_date, row['Seniority'])
+                _input_df = _input_df.drop(axis='index', labels=n)
+            elif _snapshot.num > 0 and row['Status'] == 0:  # the employee is dismissed - don't include them into past snapshots
+                _input_df = _input_df.drop(axis='index', labels=n)
+
 
         if _input_df.empty:
             snapshot_dataset = None
         else:
             snapshot_dataset = self.fill_common_features(_common_features, _input_df, snapshot_dataset)
+
+        if _snapshot.num > 0:
+            snapshot_dataset['status'] = [0 for i in range(len(snapshot_dataset['status']))]
+            full_dataset['status'] = [0 for i in range(len(full_dataset['status']))]
 
         return snapshot_dataset, full_dataset
 
@@ -474,17 +534,22 @@ class SequoiaDataset:
 
         input_df_common = data_file.parse(sheet_name='Основные данные')
 
-        snapshot_num = 0
-        snapshot = SnapShot(self.snapshot_duration, self.snapshot_min_dur, self.snapshot_initial_offset, snapshot_num)
+        snapshot = SnapShot(self.snapshot_duration, self.snapshot_min_dur, self.snapshot_initial_offset, 0)
         united_dataset = pd.DataFrame()
         while True:
             logging.info(f'Starting snapshot {snapshot.num}')
             main_dataset, main_dataset_full = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
+
             if main_dataset is None:
                 logging.info(f'No data left for snapshot {snapshot.num}. Finishing process...')
                 break
             logging.debug(f'Formed main part of dataset: {main_dataset}')
             full_snapshot_dataset = self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, main_dataset_full, snapshot)
+
+            for n, row in full_snapshot_dataset.iterrows():
+                if row.isnull().values.any():
+                    print("NaN value in snapshot dataset")
+                    full_snapshot_dataset = full_snapshot_dataset.drop(index=n)
             logging.debug(f'Final dataset for snapshot {snapshot.num}: {full_snapshot_dataset}')
             if snapshot.num == 0:
                 united_dataset = full_snapshot_dataset
@@ -492,10 +557,18 @@ class SequoiaDataset:
                 united_dataset = pd.concat([united_dataset, full_snapshot_dataset], axis=0)
             snapshot.num += 1
 
+            if snapshot.num == self.max_snapshots_number:
+                break
+
         united_dataset = united_dataset.sort_values(by='code')  # sorting by code helps further splitting to train/val, keeping snapshots of each person in the same set to prevent data leakage
-        united_dataset = united_dataset.reset_index()
-        logging.debug(f'Final dataset: {united_dataset}')
-        united_dataset.to_csv(self.output_path)
+        united_dataset = united_dataset.drop(columns=['recruitment_date', 'termination_date', 'code'])
+        cols = united_dataset.columns
+        cols = cols.drop('status')
+        cols = cols.tolist() + ['status']
+        united_dataset = united_dataset[cols]
+        # united_dataset = united_dataset.reset_index()
+        logging.debug(f'\nFinal dataset:\n{united_dataset}')
+        united_dataset.to_csv(self.output_path, index=False)
         logging.info(f'Saved dataset to {self.output_path}')
 
 

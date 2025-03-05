@@ -1,14 +1,14 @@
 data_location:
   data_path: 'data/'
-  file_name: 'all_data_final.xlsx'  # check file extension
-  output_name: 'sequoia_dataset.csv'
+  file_name: 'polimer.xlsx'  # check file extension
+  output_name: 'polimer_dataset.csv'
 basic:
-  snapshot_duration: 8  # months
-  snapshot_min_duration: 6
-  snapshot_initial_offset: 2
+  snapshot_duration: 6  # months
+  snapshot_min_duration: 1
+  snapshot_initial_offset: 1
   max_snapshots_number: 1
-  min_window: 3
-  random_snapshot: True
+  min_window: 1
+  random_snapshot: False
   date_format: '%Y.%m.%d'
   data_load_date: '01.01.2025'
   data_begin_date: '01.01.2022'
@@ -37,7 +37,7 @@ required_sheets:
         name_out: 'age'
         type: 'int'
         interval: [18, 100]
-        kind: 'continuous'
+        kind: 'common'
       f5:
         name: 'Nationality'
         name_out: 'citizenship'
@@ -77,7 +77,7 @@ required_sheets:
 #        name_out: 'n_employers'
 #        kind: 'common'
       f16:
-        name: 'Category of harmfullness'
+        name: 'Category of harmfulness'
         name_out: 'occupational_hazards'
         kind: 'common'
       f17:
@@ -85,10 +85,14 @@ required_sheets:
       f18:
         name: 'Seniority'
         name_out: 'seniority'
-        kind: 'continuous'
+        kind: 'common'
       f19:
         name: 'Status'
         name_out: 'status'
+        kind: 'common'
+      f20:
+        name: 'Birth date'
+        name_out: 'birth_date'
         kind: 'common'
 #  salary:
 #    name: 'Оплата труда'

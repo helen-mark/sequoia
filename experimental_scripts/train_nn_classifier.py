@@ -13,6 +13,10 @@ import pandas as pd
 import tensorflow as tf
 from pandas import read_csv
 from tensorflow import keras as K
+from sklearn.metrics import confusion_matrix, recall_score, precision_score
+import seaborn as sn
+import pandas as pd
+import matplotlib.pyplot as plt
 
 from kerastuner import HyperModel
 from kerastuner.tuners import BayesianOptimization
@@ -140,50 +144,51 @@ def build_model(_hp):  # function for automatic hyperparams tuning
 
 def create_model(_all_features_reg: tf.Tensor, _all_features_nonreg: tf.Tensor, _all_inputs_reg: list, _all_inputs_nonreg: list):
     n_neurons_reg = 16
-    n_neurons_nonreg = 64
-    n_neurons_hidden = 32
+    n_neurons_nonreg = 32
+    n_neurons_hidden = 16
 
     # Слои для каждой группы
-    regularized_layer = K.layers.Dense(n_neurons_reg, kernel_regularizer=K.regularizers.l2(0.01))(_all_features_reg)
+    # regularized_layer = K.layers.Dense(n_neurons_reg, kernel_regularizer=K.regularizers.l2(0.01))(_all_features_reg)
     non_regularized_layer = K.layers.Dense(n_neurons_nonreg)(_all_features_nonreg)
 
     # Объединение выходов
-    concat_layer = K.layers.concatenate([regularized_layer, non_regularized_layer])
+    # concat_layer = K.layers.concatenate([regularized_layer, non_regularized_layer])
 #    all_inputs = K.layers.concatenate(_all_inputs_reg + _all_inputs_nonreg)
 
-    x = K.layers.Dense(n_neurons_nonreg, activation='relu', kernel_regularizer=K.regularizers.l2(0.01))(_all_features_nonreg)
+    x = K.layers.Dense(n_neurons_nonreg, activation='relu')(_all_features_nonreg)
     x = K.layers.Dropout(0.5)(x)
    # x = K.layers.Dense(n_neurons, activation="relu")(concat_layer)
     x = K.layers.Dense(n_neurons_hidden, activation="relu")(x)
     x = K.layers.Dense(n_neurons_hidden/2, activation="relu")(x)
+    x = K.layers.Dropout(0.25)(x)
     output = K.layers.Dense(1, activation="sigmoid")(x)
 
     model = K.Model(_all_inputs_nonreg, output)
 
-    optimizer = K.optimizers.Adam(learning_rate=0.005)
+    optimizer = K.optimizers.Adam(learning_rate=0.01)
     model.compile(loss='binary_focal_crossentropy', optimizer=optimizer, metrics=['accuracy', K.metrics.Recall(), K.metrics.Precision()])
     return model
 
 
-def train(_dataset_path: str, _batch_size: int):
-    train_ds, val_ds, val_ds_2, train_dataframe, _ = create_dataset(_dataset_path, _batch_size)
+def train(_dataset1: pd.DataFrame, _val_dataset: pd.DataFrame, _batch_size: int):
+    train_ds, val_ds, val_ds_2, train_dataframe, _ = create_dataset(_dataset1, _val_dataset, _batch_size)
     all_features_reg, all_features_nonreg, all_inputs_reg, all_inputs_nonreg = prepare_all_features(train_ds)
     model = create_model(all_features_reg, all_features_nonreg, all_inputs_reg, all_inputs_nonreg)
 
-    tuner = BayesianOptimization(build_model,
-                                 objective='val_accuracy',
-                                 max_trials=10,
-                                 directory='my_dir',
-                                 project_name='bayesian_tune')
-
-    # Обучение модели
-    tuner.search(train_ds,epochs=100,  validation_data=val_ds)
-
-    # Получение результатов
-    best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-    best_model = tuner.hypermodel.build(best_hps)
-    best_model.fit(train_ds,epochs=100,  validation_data=val_ds)
-    print("Best hyperparam:", best_hps)
+    # tuner = BayesianOptimization(build_model,
+    #                              objective='val_accuracy',
+    #                              max_trials=10,
+    #                              directory='my_dir',
+    #                              project_name='bayesian_tune')
+    #
+    # # Обучение модели
+    # tuner.search(train_ds,epochs=100,  validation_data=val_ds)
+    #
+    # # Получение результатов
+    # best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+    # best_model = tuner.hypermodel.build(best_hps)
+    # best_model.fit(train_ds,epochs=100,  validation_data=val_ds)
+    # print("Best hyperparam:", best_hps)
 
     tboard = K.callbacks.TensorBoard(
         log_dir="logs",
@@ -208,23 +213,82 @@ def train(_dataset_path: str, _batch_size: int):
     )
 
     def scheduler(epoch, lr):
-        if epoch < 20:
+        if epoch < 30:
             return lr
         else:
-            return lr * np.exp(-0.05)
+            return lr * np.exp(-0.02)
 
     scheduler = K.callbacks.LearningRateScheduler(scheduler)
     # fit the keras model
-    model.fit(train_ds, epochs=150, batch_size=_batch_size, validation_data=val_ds, callbacks=[tboard, save_best, scheduler])
+    model.fit(train_ds, epochs=100, batch_size=_batch_size, validation_data=val_ds, callbacks=[tboard, save_best, scheduler])
 
+    best_model = K.models.load_model('best_keras_model')
+    print(best_model.summary())
+    # print('Evaluation...')
+    # best_model.evaluate(val_ds)
+
+    calculate_feature_importance(best_model, train_dataframe, val_ds, val_ds_2, all_features_nonreg)
+    return best_model
+
+
+def evaluation_and_matrix(_val_1: pd.DataFrame, _val_2: pd.DataFrame, _val_common: pd.DataFrame, _batch_size: int):
+    model = K.models.load_model('best_keras_model')
     print(model.summary())
-    print('Evaluation...')
-    model.evaluate(val_ds)
+    # evaluate on different production fields separately
+    val_ds_1 = dataframe_to_dataset(_val_1)
+    val_ds_1 = val_ds_1.batch(_batch_size)
+    val_ds_2 = dataframe_to_dataset(_val_2)
+    val_ds_2 = val_ds_2.batch(_batch_size)
 
-    calculate_feature_importance(model, train_dataframe, val_ds, val_ds_2, all_features_nonreg)
+    print("evaluate on polimer...")
+    model.evaluate(val_ds_1)
+    model.evaluate(val_ds_2)
+    # Predict
+    val_ds = dataframe_to_dataset(_val_common)
+    val_ds_b = val_ds.batch(_batch_size)
+
+    PREDICTIONS = []
+    TRUE_LABELS = []
+    for n, row in _val_common.iterrows():
+        df = _val_common.loc[_val_common.index == n]
+        df = df.loc[df['age'] == row['age']]
+        true_label = row['status']
+        ds = dataframe_to_dataset(df)
+        ds = ds.batch(_batch_size)
+        pred = model.predict(ds, verbose=False)
+        PREDICTIONS.append(pred[0][0])
+        TRUE_LABELS.append(true_label)
+
+    predicted_classes = (np.array(PREDICTIONS) > 0.5).astype(int)
+    result = confusion_matrix(TRUE_LABELS, predicted_classes)
+    recall = recall_score(TRUE_LABELS, predicted_classes)
+    prec = precision_score(TRUE_LABELS, predicted_classes)
+    print(recall, prec)
+    sn.set(font_scale=1.4)  # for label size
+    sn.heatmap(result, annot=True, annot_kws={"size": 16})  # font size
+
+    plt.show()
 
 
 if '__main__' == __name__:
     dataset_path = 'data/sequoia_dataset.csv'
+    dataset2_path = 'data/polimer_dataset.csv'
+
+    dataset1 = pd.read_csv(dataset_path)
+    dataset2 = pd.read_csv(dataset2_path)
+
+    val_1 = dataset1.sample(frac=0.2, random_state=1337)
+    val_2 = dataset2.sample(frac=0.2, random_state=1337)
+    train_1 = dataset1.drop(val_1.index)
+    train_2 = dataset2.drop(val_2.index)
+
+    # dataset = pd.concat([dataset1, dataset2], axis=0)
+
+    val_dataframe = pd.concat([val_1, val_2], axis=0)  # dataset.sample(frac=0.2, random_state=1337)
+    train_dataframe = pd.concat([train_1, train_2], axis=0)  # dataset.drop(val_dataframe.index)
+
     batch_size = 32
-    train(dataset_path, batch_size)
+    best_model = train(train_dataframe, val_dataframe, batch_size)
+
+    evaluation_and_matrix(val_1, val_2, val_dataframe,  batch_size)
+

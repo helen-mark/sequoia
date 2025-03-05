@@ -60,7 +60,7 @@ def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 
 
 def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
-    model = RandomForestRegressor(n_estimators=10, max_features='sqrt')
+    model = RandomForestRegressor(n_estimators=100, max_features='sqrt')
     best_precision = 0.
     best_model = model
 
@@ -99,7 +99,7 @@ def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 
 
 def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
-    model = RandomForestClassifier(n_estimators=100)
+    model = RandomForestClassifier(n_estimators=200)
     best_precision = 0.
     best_model = model
 
@@ -199,12 +199,10 @@ def normalize(_data: pd.DataFrame):
     return _data.apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0)
 
 
-def prepare_dataset(_dataset_path: str, _test_split: float, _normalize: bool):
-    dataset = read_csv(_dataset_path, delimiter=',')
-    dataset.head()
+def prepare_dataset(_dataset: pd.DataFrame, _test_split: float, _normalize: bool):
     target_idx = -1  # index of "works/left" column
 
-    dataset = dataset.transpose()
+    dataset = _dataset.transpose()
     trg = dataset[target_idx:]
     trn = dataset[:target_idx]
 
@@ -273,23 +271,32 @@ def show_decision_tree(_model):
 if __name__ == '__main__':
     # config_path = 'config.json'  # config file is used to store some parameters of the dataset
     config = {
-        'model': 'RandomForestClassifier',  # options: 'RandomForestRegressor', 'RandomForestClassifier', 'XGBoostClassifier', 'LinearRegression'
+        'model': 'XGBoostClassifier',  # options: 'RandomForestRegressor', 'RandomForestClassifier', 'XGBoostClassifier', 'LinearRegression'
         'test_split': 0.2,  # validation/training split proportion
         'normalize': False,  # normalize input values or not
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/sequoia_dataset.csv'
+        'dataset_src': 'data/seq_dataset.csv'
     }
+    dataset_path = 'data/seq_dataset.csv'
+    dataset2_path = 'data/polimer_dataset.csv'
 
+    dataset1 = pd.read_csv(dataset_path)
+    dataset2 = pd.read_csv(dataset2_path)
+
+    dataset = pd.concat([dataset1, dataset2], axis=0)
+
+    #val_dataframe = dataset.sample(frac=0.2, random_state=1337)
+    #train_dataframe = dataset.drop(val_dataframe.index)
     # Load the dataset from file and split it to train/test:
-    x_train, x_test, y_train, y_test = prepare_dataset(config['dataset_src'], config['test_split'], config['normalize'])
+    x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
 
     w_0, w_1 = 0, 0
     for i in y_train.values:
         w_0 += 1 - i
         w_1 += i
-    sample_weight = np.array([w_0.item() if i == 1 else w_1.item() for i in y_train.values])
-    # sample_weight = np.array([1 if i == 1 else 1 for i in y_train.values])
+    # sample_weight = np.array([w_0.item() if i == 1 else w_1.item() for i in y_train.values])
+    sample_weight = np.array([1 if i == 1 else 1 for i in y_train.values])
 
     print(sample_weight)
     # Train model and save it:

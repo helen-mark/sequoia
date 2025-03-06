@@ -1,17 +1,21 @@
 data_location:
   data_path: 'data/'
-  file_name: 'polimer.xlsx'  # check file extension
-  output_name: 'polimer_dataset.csv'
-basic:
+  file_name: 'all_data_final.xlsx'  # check file extension
+  output_name: 'sequoia_dataset.csv'
+time_snapshots:
   snapshot_duration: 6  # months
-  snapshot_min_duration: 1
+  snapshot_min_duration: 2
   snapshot_initial_offset: 1
   max_snapshots_number: 1
-  min_window: 1
-  random_snapshot: False
+  min_window: 2
+  random_snapshot: True
+data:
   date_format: '%Y.%m.%d'
   data_load_date: '01.01.2025'
   data_begin_date: '01.01.2022'
+  region: 'Москва'
+  industry: 'Light industry'  #  Metals, Light industry
+  income_calibration: 'Inflation'  # Living wage, Inflation
 required_sheets:
   basic:
     name: 'Основные данные'

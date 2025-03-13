@@ -1,21 +1,37 @@
 data_location:
-  data_path: 'data/'
-  file_name: 'all_data_final.xlsx'  # check file extension
-  output_name: 'sequoia_dataset.csv'
+  data_path: 'data_raw/'
+  trg_path: 'data/'
+
+#  file_name: 'all_data_final.xlsx'  # check file extension
+#  output_name: 'sequoia_dataset.csv'
+#data:
+#  region: 'Москва'
+#  industry: 'Light industry'  #  Metals, Light industry
+
+  file_name: 'SWG_final.xlsx'  # check file extension
+  output_name: 'swg_dataset.csv'
+data:
+  region: 'Москва'
+  industry: 'Light industry'  #  Metals, Light industry
+
+#  file_name: 'polimer.xlsx'  # check file extension
+#  output_name: 'polimer_dataset.csv'
+#data:
+#  region: 'Оренбург'
+#  industry: 'Metals'  #  Metals, Light industry
+  income_calibration: 'Inflation'  # Living wage, Inflation
+  remove_short_service: False
+  date_format: '%Y.%m.%d'
+  data_load_date: '01.01.2025'
+  data_begin_date: '01.01.2024'
 time_snapshots:
-  snapshot_duration: 6  # months
-  snapshot_min_duration: 2
+  snapshot_step: 6  # months
+  snapshot_min_duration: 1
   snapshot_initial_offset: 1
   max_snapshots_number: 1
   min_window: 2
-  random_snapshot: True
-data:
-  date_format: '%Y.%m.%d'
-  data_load_date: '01.01.2025'
-  data_begin_date: '01.01.2022'
-  region: 'Москва'
-  industry: 'Light industry'  #  Metals, Light industry
-  income_calibration: 'Inflation'  # Living wage, Inflation
+  max_window: 6
+  random_snapshot: False
 required_sheets:
   basic:
     name: 'Основные данные'
@@ -255,42 +271,42 @@ required_sheets:
         name: 'Ноябрь'
       f14:
         name: 'Декабрь'
-  overtime:
-    name: 'Сверхурочка'
-    name_out: 'overtime'
-    kind: 'time_series'
-    features:
-      f1:
-        name: '№'
-        type: 'int'
-      f2:
-        name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
-        type: 'str'
-      f3:
-        name: 'Январь'
-        type: 'str'
-      f4:
-        name: 'Февраль'
-      f5:
-        name: 'Март'
-      f6:
-        name: 'Апрель'
-      f7:
-        name: 'Май'
-      f8:
-        name: 'Июнь'
-      f9:
-        name: 'Июль'
-      f10:
-        name: 'Август'
-      f11:
-        name: 'Сентябрь'
-      f12:
-        name: 'Октябрь'
-      f13:
-        name: 'Ноябрь'
-      f14:
-        name: 'Декабрь'
+#  overtime:
+#    name: 'Сверхурочка'
+#    name_out: 'overtime'
+#    kind: 'time_series'
+#    features:
+#      f1:
+#        name: '№'
+#        type: 'int'
+#      f2:
+#        name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+#        type: 'str'
+#      f3:
+#        name: 'Январь'
+#        type: 'str'
+#      f4:
+#        name: 'Февраль'
+#      f5:
+#        name: 'Март'
+#      f6:
+#        name: 'Апрель'
+#      f7:
+#        name: 'Май'
+#      f8:
+#        name: 'Июнь'
+#      f9:
+#        name: 'Июль'
+#      f10:
+#        name: 'Август'
+#      f11:
+#        name: 'Сентябрь'
+#      f12:
+#        name: 'Октябрь'
+#      f13:
+#        name: 'Ноябрь'
+#      f14:
+#        name: 'Декабрь'
 #  night_hours:
 #    name: 'Количество ночных смен'
 #    name_out: 'night_hours'

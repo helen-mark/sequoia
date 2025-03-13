@@ -4,7 +4,9 @@ import pandas as pd
 from datetime import date
 import hashlib
 
-ON_COLUMN = 'Code'
+from matplotlib.dates import DAYS_PER_MONTH
+
+ON_COLUMN = 'Сотрудник'
 DATA_START_DATE = date(year=2022, month=1, day=1)
 DATA_LOAD_DATE = date(year=2025, month=1, day=1)
 
@@ -49,31 +51,32 @@ def check_duplicates(_df: pd.DataFrame):
     print("Resident:", n_res, 'Not resident:', n_neres)
 
 
-def filter_job_categories(_path: str):
-    df = pd.read_excel(_path, sheet_name='Основные данные')
+def filter_job_categories(_path: str, _feature_name: str):
+    df = pd.read_excel(_path, sheet_name=_feature_name)
     for n, row in df.iterrows():
         if row['Job title'] == 'senior':
             df = df.drop(index=n)
     writer = pd.ExcelWriter(_path, engine='openpyxl',  if_sheet_exists='replace', mode='a')
-    df.to_excel(writer, sheet_name='Основные данные',index=False, engine='openpyxl')
+    df.to_excel(writer, sheet_name=_feature_name,index=False, engine='openpyxl')
     writer.close()
 
 
-def job_category(_path: str, _cat_path: str):
-    df = pd.read_excel(_path, sheet_name='Основные данные')
+def job_category(_path: str, _cat_path: str, _feature_name: str):
+    df = pd.read_excel(_path, sheet_name=_feature_name)
     cat = pd.read_excel(_cat_path, sheet_name='Sheet1')
 
     def get_cat(job_title: str):
         title = cat.loc[cat['job_title'] == job_title]
         if title.empty:
-            print(job_title)
-        print(job_title)
+            print("No such job title!", job_title)
+            return job_title
+        print(job_title, title['cat'])
         return title['cat'].item()
 
     df['Job title'] = df['Job title'].apply(get_cat)
 
     writer = pd.ExcelWriter(_path, engine='openpyxl',  if_sheet_exists='replace', mode='a')
-    df.to_excel(writer, sheet_name='Основные данные', index=False, engine='openpyxl')
+    df.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
     writer.close()
     return df
 
@@ -95,7 +98,7 @@ def create_unique_code(_path: str, _sheet_names: list):
         # Генерируем уникальный 6-значный номер
         unique_number = int(hashed_fio[:6], 16)
 
-        return  unique_number
+        return  3300000000 + unique_number
 
     writer = pd.ExcelWriter(_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
     for sn in _sheet_names:
@@ -104,15 +107,34 @@ def create_unique_code(_path: str, _sheet_names: list):
         df['Code'] = df[ON_COLUMN].apply(generate_unique_number)
         df.to_excel(writer, sheet_name=sn, index=False, engine='openpyxl')
     writer.close()
-    return df
 
 
-def classify_employees(_path1: str):
+def classify_employees(_path1: str, _job_cat_path: str):
     df = pd.read_excel(_path1, sheet_name='Основные данные')
-    job_titles = df['Должность'].values
-    unique_set = set(job_titles)
+    cat = pd.read_excel(_job_cat_path, sheet_name='Sheet1')
+
+    new_titles = []
+    def get_cat(job_title: str):
+        title = cat.loc[cat['job_title'] == job_title]
+        if title.empty:
+            new_titles.append(job_title)
+        else:
+            print("Exists", job_title)
+
+    df['Job title'] = df['Job title'].apply(get_cat)
+    unique_set = set(new_titles)
     for v in sorted(unique_set):
         print(v)
+
+
+def working_region(_path: str):
+    df = pd.read_excel(_path, sheet_name='Основные данные')
+
+    work_regions = df['Место работы'].values
+    unique_set = set(work_regions)
+    for v in unique_set:
+        print(v)
+
 
 
 def check_absent_people(_path1: str, _path2: str):
@@ -167,39 +189,63 @@ def merge_timeseries(_path: str, _res_path: str, _compamy_name: str, _time_serie
             print("Additionally remove duplicate", sample[ON_COLUMN])
             df_res = df_res.drop(df_res[df_res[ON_COLUMN] == code].index)
             codes = df_res[ON_COLUMN].values
-    result_path = os.path.join(_res_path, _compamy_name + '_' + _time_series_name + '.xlsx')
-    print("Writing result to", result_path)
-    writer = pd.ExcelWriter(result_path, mode='w', engine='xlsxwriter')
+    print("Writing result to", _res_path)
+    writer = pd.ExcelWriter(_res_path, mode='a', engine='openpyxl')
     df_res.to_excel(writer, sheet_name=_time_series_name, index=False)
     writer.close()
 
 
-def merge_two_tables(_df_res: pd.DataFrame, _df_cur: pd.DataFrame, _on_column: str):
-    codes = _df_res[_on_column].values
+def merge_two_tables(_df_pres: pd.DataFrame, _df_past: pd.DataFrame, _on_column: str):
+    pres_codes = _df_pres[_on_column].values
 
-    for n, row in _df_cur.iterrows():
+    for n, row in _df_past.iterrows():
         code = (row[_on_column])
-        if code not in codes:
-            _df_res.loc[_df_res.index.max() + 1] = row
+        if code not in pres_codes:
+            _df_pres.loc[_df_pres.shape[0]+1] = row
+            if 'Ахачев' in code:
+                print("Add", row.values)
 
-        # elif code in codes:
-        #     print("Already exists:", code)
-        #     sample = _df_res.loc[_df_res[_on_column] == code]
-        #     hire_date_1 = sample['Hire date']
-        #     hire_date_2 = row['Hire date']
-        #     if hire_date_2 == 'Дата приема':
-        #         continue
-        #     print(hire_date_1, hire_date_2)
-        #
-        #     if len(hire_date_1) > 1 or hire_date_1.item() != hire_date_2:  # non-resident who resign and get hired back regularly
-        #         print("Attention: dropping duplicate", row[_on_column])
-        #         _df_res = _df_res.drop(_df_res[_df_res[_on_column] == code].index)
-        #         codes = _df_res[_on_column].values
-    return _df_res
+        elif False and code in pres_codes:
+            print("Already exists:", code)
+            sample = _df_pres.loc[_df_pres[_on_column] == code]
+            hire_date_pres = sample['Hire date']
+            hire_date_past = row['Hire date']
+            dism_date_pres = sample['Date of dismissal']
+            dism_date_past = row['Date of dismissal']
+            if hire_date_past == 'Дата приема':
+                continue
+            print(hire_date_pres, hire_date_past)
+
+            if len(hire_date_pres) > 1:
+                hire_dates = 111  # placeholder
+
+            elif len(hire_date_pres) == 1:  # person has 1 row in the first table
+                absence_time = -1
+                non_resident = False
+                if hire_date_pres.item() > dism_date_past:  # non-resident who resign and get hired back regularly
+                    absence_time = (hire_date_pres.item() - dism_date_past).days
+                    non_resident = True
+                elif hire_date_past > dism_date_pres.item():
+                    absence_time = (hire_date_past - dism_date_pres.item()).days
+                    non_resident = True
+
+                if non_resident:
+                    if absence_time > 60:  # register him as a new hire
+                        new_code = code + '_hired_again'
+                        row[code] = new_code
+                        _df_pres.loc[_df_pres.index.max() + 1] = row
+                        _df_past.loc[n] = row
+                    else:  # person has small absence time, merge the instances
+                        _df_pres.loc[_df_pres[_on_column] == code]['Hire date'] = min(hire_date_past, hire_date_pres.item())
+                        _df_pres.loc[_df_pres[_on_column] == code]['Date of dismissal'] = max(dism_date_past, dism_date_pres.item())
+
+                    # print("Attention: dropping duplicate", row[_on_column])
+                    # _df_res = _df_pres.drop(_df_pres[_df_pres[_on_column] == code].index)
+    return _df_pres
 
 def merge_tables(_path: str, _company_name: str, _feature_name: str, _check_feature: bool = False):
     df_res = pd.DataFrame()
-
+    print(df_res)
     for dirpath, dirnames, filenames in os.walk(_path):
         if dirpath == _path:
             n = 0
@@ -213,10 +259,12 @@ def merge_tables(_path: str, _company_name: str, _feature_name: str, _check_feat
                     n += 1
                     continue
                 print('\nMerging\n', filename)
+                print(df_res.loc[df_res[ON_COLUMN] == 'Ахачев Александр Сергеевич'])
                 _path2 = os.path.join(dirpath, filename)
                 df_cur = pd.read_excel(_path2)  # , sheet_name=_feature_name)
 
                 df_res = merge_two_tables(df_res, df_cur, ON_COLUMN)
+                print(df_res.loc[df_res[ON_COLUMN] == 'Ахачев Александр Сергеевич'])
 
 
     # remove duplicates:
@@ -228,16 +276,7 @@ def merge_tables(_path: str, _company_name: str, _feature_name: str, _check_feat
             df_res = df_res.drop(df_res[df_res[ON_COLUMN] == code].index)
             codes = df_res[ON_COLUMN].values
 
-    result_filename = _company_name +'.xlsx'
-    result_path = os.path.join(_path, result_filename)
-    if os.path.exists(result_path):
-        writer = pd.ExcelWriter(result_path, mode='a', if_sheet_exists='error', engine='openpyxl')
-    else:
-        writer = pd.ExcelWriter(result_path, mode='w', engine='openpyxl')
-
-    print("writing result to ", result_path)
-    df_res.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
-    writer.close()
+    return df_res
 
 
 def merge_firms(_path: str, _res_path: str):
@@ -297,9 +336,9 @@ def rename_columns(_filepath: str):
     df.columns = new_columns
 
 
-def add_zero_lines(_time_series_path: str, _main_path: str, _feature_name: str):
-    df_main = pd.read_excel(_main_path)
-    ts_df = pd.read_excel(_time_series_path)
+def add_zero_lines(_main_path: str, _feature_name: str):
+    df_main = pd.read_excel(_main_path, sheet_name='Основные данные')
+    ts_df = pd.read_excel(_main_path, sheet_name=_feature_name)
 
     codes_main = df_main[ON_COLUMN].unique()
     codes_ts = ts_df[ON_COLUMN].unique()
@@ -310,14 +349,14 @@ def add_zero_lines(_time_series_path: str, _main_path: str, _feature_name: str):
             new_row = [code] + list(0 for i in range(36))
             ts_df.loc[ts_df.index.max() + 1] = new_row
 
-    writer = pd.ExcelWriter(_time_series_path, mode='a', engine='openpyxl')
-    ts_df.to_excel(writer, sheet_name=_feature_name+'_zeros', index=False)
+    writer = pd.ExcelWriter(_main_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
+    ts_df.to_excel(writer, sheet_name=_feature_name, index=False)
     writer.close()
 
 
 def add_zero_vacations(_main_path: str, _feature_name: str):
     df_main = pd.read_excel(_main_path, sheet_name="Основные данные")
-    ts_df = pd.read_excel(_main_path, sheet_name="Отпуск")
+    ts_df = pd.read_excel(_main_path, sheet_name=_feature_name)
 
     codes_main = df_main[ON_COLUMN].unique()
     codes_ts = ts_df[ON_COLUMN].unique()
@@ -327,7 +366,8 @@ def add_zero_vacations(_main_path: str, _feature_name: str):
         code = row[ON_COLUMN]
         if code not in codes_ts:
             # add this sample and fill with zeros
-            hire_date = str_to_datetime(row['Дата приема'])
+            hire_date = str_to_datetime(row['Date of employment'])
+            print(code)
             hire_year = hire_date.year
             hire_month = hire_date.month
             if hire_year < 2022:
@@ -337,7 +377,7 @@ def add_zero_vacations(_main_path: str, _feature_name: str):
             new_row = [code] + list(0 for i in range(hire_month)) + list(add_per_month*i for i in range(36-hire_month))
             ts_df.loc[ts_df.index.max() + 1] = new_row
 
-    writer = pd.ExcelWriter(_main_path, mode='a', engine='openpyxl')
+    writer = pd.ExcelWriter(_main_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
     ts_df.to_excel(writer, sheet_name=_feature_name+'_zeros', index=False)
     writer.close()
 
@@ -346,13 +386,13 @@ def str_to_datetime(_date_str: str):
     splt = _date_str.split('.')
     return date(int(splt[2]), int(splt[1]), int(splt[0]))
 
+DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
-def events_to_timeseries(_path_events: str, _path2: str, _company_name: str, _feature_name: str, _check_feature: bool = False):
+def events_to_timeseries(_path_events: str, _trg_path: str, _feature_name: str, _check_feature: bool = False):
     df_res = pd.DataFrame(columns=[ON_COLUMN, 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sept', 'oct', 'nov', 'dec'])
 
     print('\nMaking time series\n', _path_events)
     df_events = pd.read_excel(_path_events)  # events (vacations)
-    df_init = pd.read_excel(_path2)  # initial state
     add_per_month = 2.33  # vacation days a person earns per month in Russia
     # remove duplicates:
     codes = df_events[ON_COLUMN].unique()
@@ -361,16 +401,69 @@ def events_to_timeseries(_path_events: str, _path2: str, _company_name: str, _fe
     for code in codes:
         if pd.isnull(code):
             continue
-        initial = df_init.loc[df_init[ON_COLUMN] == code]
-        if initial.empty:
+
+        amount_per_month = [0 for i in range(12)]
+        samples = df_events.loc[df_events[ON_COLUMN] == code]
+        for n, sample in samples.iterrows():
+            if sample['Вид отсутствия'] in ['Отпуск основной', 'Командировка', 'Отпуск по уходу за ребенком', 'Отпуск по беременности и родам']:
+                continue
+            start = str_to_datetime(sample['Начало'])
+            end = str_to_datetime(sample['Окончание'])
+            days_tot = (end - start).days
+            start_month = start.month
+            end_month = end.month
+            if start_month == end_month:
+                amount_per_month[start_month-1] += days_tot
+            else:
+                amount_per_month[start_month-1] += DAYS_PER_MONTH[start_month-1] - start.day
+                amount_per_month[end_month-1] += end.day
+
+                for month in range(start_month+1, end_month):
+                    amount_per_month[month-1] += 30
+
+        print(code, amount_per_month)
+        new_row = [code] + amount_per_month
+        print("INDEX", df_res.index)
+        df_res.loc[df_res.shape[0]+1] = new_row
+        num += 1
+
+    writer = pd.ExcelWriter(_trg_path, mode='w', engine='openpyxl')
+    df_res.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
+    writer.close()
+
+
+def vacation_to_timeseries(_path_events: str, _path2: str, _trg_path: str, _feature_name: str, _check_feature: bool = False):
+    df_res = pd.DataFrame(columns=[ON_COLUMN, 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sept', 'oct', 'nov', 'dec'])
+
+    print('\nMaking time series\n', _path_events)
+    df_events = pd.read_excel(_path_events)  # events (vacations)
+    if _path2 is not None:
+        df_init = pd.read_excel(_path2)  # initial state
+    else:
+        df_init = None
+    add_per_month = 2.33  # vacation days a person earns per month in Russia
+    # remove duplicates:
+    codes = df_events[ON_COLUMN].unique()
+    num = 0
+    print(f"processing {len(codes)} unique codes")
+    for code in codes:
+        if pd.isnull(code):
             continue
-        vacation_left = initial['Итого'].item()
-        if pd.isnull(vacation_left):
+        if df_init is None:
             vacation_left = 0
+        else:
+            initial = df_init.loc[df_init[ON_COLUMN] == code]
+            if initial.empty:
+                continue
+            vacation_left = initial['Дни'].item()
+            if pd.isnull(vacation_left):
+                vacation_left = 0
 
         substract_per_month = [0 for i in range(12)]
         samples = df_events.loc[df_events[ON_COLUMN] == code]
         for n, sample in samples.iterrows():
+            if sample['Вид отсутствия'] not in ['Отпуск основной']:
+                continue
             start = str_to_datetime(sample['Начало'])
             end = str_to_datetime(sample['Окончание'])
             days_tot = (end - start).days
@@ -397,8 +490,8 @@ def events_to_timeseries(_path_events: str, _path2: str, _company_name: str, _fe
         df_res.loc[df_res.shape[0]+1] = new_row
         num += 1
 
-    writer = pd.ExcelWriter(_path_events, mode='a', if_sheet_exists='replace', engine='openpyxl')
-    df_res.to_excel(writer, sheet_name=_feature_name+'_ts', index=False, engine='openpyxl')
+    writer = pd.ExcelWriter(_trg_path, mode='w', engine='openpyxl')
+    df_res.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
     writer.close()
 
 
@@ -448,30 +541,43 @@ def merge_companies(_main_dir: str, _time_series_names: list):
             ts_sub = os.path.join(ts_dir, sub_folder)
             # merge_firms(ts_sub, ts_dir)
 
-def merge_main_data(_main_dir: str, _company_names: list):
+def merge_main_data(_main_dir: str, _company_names: list, _feature_name: str, _final_path: str):
     for company_name in _company_names:
         company_dir = os.path.join(_main_dir, company_name)
-        # merge_tables(company_dir, company_name, 'фактический', True)
+        res_df = merge_tables(company_dir, company_name, _feature_name, True)
+
+        if os.path.exists(_final_path):
+            writer = pd.ExcelWriter(_final_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
+        else:
+            writer = pd.ExcelWriter(_final_path, mode='w', engine='openpyxl')
+
+        print("writing result to ", _final_path)
+        res_df.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
+        writer.close()
 
 
 if __name__ == '__main__':
-    time_series_names = ['Отпуск', 'Выплаты', 'Отсутствия', 'Сверхурочка']
-    main_dir = '/home/elena/ATTRITION/sequoia/Выгрузка'
-    company_names =  ['Берендсен', 'Вига-65', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
-    data_dir = 'Выгрузка'
+    time_series_names = ['Отпуск', 'Отсутствия']  # ['Отпуск', 'Выплаты', 'Отсутствия', 'Сверхурочка']
+    main_dir = '/home/elena/ATTRITION/sequoia/'
+    company_names = ['SWG']  # ['Берендсен', 'Вига-65', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
+    data_dir = 'SWG'
+
+    final_filename = data_dir + '_final.xlsx'
+    final_path = os.path.join(main_dir, data_dir, final_filename)
 
     # run_short_employment(main_dir, company_names)
     # check_duplicates(pd.read_excel(os.path.join(main_dir, 'all_Основные данные_dupl.xlsx')))
-    # merge_tables(main_dir, 'all')
     # check_absent_people(data_dir + "/q.xlsx", data_dir + '/Сверхурочка.xlsx')
 
     # First merge Maki and Kover into Mat
     # merge_companies(main_dir, time_series_names)
 
     # then merge main data:
-    # merge_main_data(main_dir, company_names)
+    # merge_main_data(main_dir, company_names, 'Основные данные', final_path)
 
-    # events_to_timeseries(os.path.join(data_dir, 'фактический отпуск 2024.xlsx'), os.path.join(data_dir, 'остатки отпуска 2024.xlsx'), 'полимер', 'Отпуск')
+    events_to_timeseries_path = os.path.join(main_dir, data_dir, 'Отсутствия_22.xlsx')
+    # vacations_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2024.xlsx'), os.path.join(data_dir, 'Остатки отпусков 01.01.2024.xlsx'), events_to_timeseries_path, 'Отпуск')
+    # events_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2022.xlsx'), events_to_timeseries_path, 'Отсутствия')
 
     # then merge time series of different years:
     for time_series_name in time_series_names:
@@ -481,44 +587,43 @@ if __name__ == '__main__':
             # filename = time_series_name + '.xlsx'
             # time_series_dfs.append(pd.read_excel(os.path.join(company_dir, filename)))
             sub_fold = os.path.join(company_dir, time_series_name)
-            # merge_timeseries(sub_fold, main_dir, company_name, time_series_name)
+            # merge_timeseries(sub_fold, final_path, company_name, time_series_name)
 
     # then merge timeseries of different companies:
     for dirpath, dirnames, filenames in os.walk(main_dir):
         if dirpath == main_dir:
             for time_series_name in time_series_names:
-                # merge_tables(main_dir, 'data_final', time_series_name, True)
+#                merge_tables(main_dir, 'data_final', time_series_name, True)
                 pass
 
-    # add_zero_lines(os.path.join(data_dir, 'Отпуск.xlsx'), os.path.join(data_dir, 'полимер.xlsx'),'Отпуск')
-    add_zero_vacations(os.path.join(data_dir, 'полимер.xlsx'), 'Отпуск')
-    # final_data_path = os.path.join(main_dir, 'data_final.xlsx')
+    # add_zero_lines(final_path, 'Отсутствия')
+    # add_zero_vacations(final_path, 'Отпуск')
 
     # create codes:
-    # create_unique_code(os.path.join(data_dir, 'полимер.xlsx'), time_series_names + ['Основные данные'])
+    # create_unique_code(final_path, ['Выплаты'])  # time_series_names + ['Основные данные'])
 
     # Finally, apply job categories:
     job_categories_path = os.path.join(main_dir, 'job_categories.xlsx')
-    # job_category(os.path.join(data_dir, 'полимер.xlsx'), job_categories_path)
-    # filter_job_categories(final_data_path)
+    # classify_employees(final_path, job_categories_path)
+    # job_category(final_path, job_categories_path, 'Основные данные')
+    # filter_job_categories(final_path, 'Основные данные')
 
     # fill empty cells with zeros for absenteism table:
-    # df = pd.read_excel(os.path.join(data_dir, 'полимер.xlsx'), sheet_name='Отсутствия')
+    # df = pd.read_excel(final_path, sheet_name='Отсутствия')
     # df = fill_zeros(df)
-    # writer = pd.ExcelWriter(os.path.join(data_dir, 'полимер.xlsx'), mode='a', if_sheet_exists='replace', engine='openpyxl')
+    # writer = pd.ExcelWriter(final_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
     # df.to_excel(writer, sheet_name='Отсутствия', index=False)
     # writer.close()
 
+    working_region(final_path)
 
     for dirpath, dirnames, filenames in os.walk(data_dir):
         for filename in filenames:
             # print("Working with file", filename)
             path_to_file = os.path.join(dirpath, filename)
             df = pd.read_excel(path_to_file)
-            check_duplicates(df)
+            # check_duplicates(df)
 
-    file3 = os.path.join(data_dir, 'полимер.xlsx')
-    # classify_employees(file3)
     # count_dismissed(file3)
 
 

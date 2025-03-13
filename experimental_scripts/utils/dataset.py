@@ -116,9 +116,9 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
     seniority_encoded = encode_numerical_feature(seniority, "seniority", _train_ds)
     vacation_days_s_encoded = encode_numerical_feature(vacation_days_s, "vacation_days_shortterm", _train_ds)
     #vacation_days_l_encoded = encode_numerical_feature(vacation_days_l, "vacation_days_longterm", _train_ds)
-    # external_factor_1_encoded = encode_numerical_feature(external_factor_1, "external_factor_1", _train_ds)
-    # external_factor_2_encoded = encode_numerical_feature(external_factor_2, "external_factor_2", _train_ds)
-    # external_factor_3_encoded = encode_numerical_feature(external_factor_3, "external_factor_3", _train_ds)
+    external_factor_1_encoded = encode_numerical_feature(external_factor_1, "external_factor_1", _train_ds)
+    external_factor_2_encoded = encode_numerical_feature(external_factor_2, "external_factor_2", _train_ds)
+    external_factor_3_encoded = encode_numerical_feature(external_factor_3, "external_factor_3", _train_ds)
 
     # days_before_salary_increase_encoded = encode_numerical_feature(days_before_salary_increase,
     #                                                               "days_before_salary_increase", _train_ds)
@@ -154,10 +154,10 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
         #salary_6m_average,
         salary_cur,
         field,
-        hazards
-        #external_factor_1,
-        #xternal_factor_2,
-        #external_factor_3
+        hazards,
+        # external_factor_1,
+        # external_factor_2,
+        # external_factor_3
     ]
 
     all_inputs_reg = [
@@ -189,10 +189,10 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
 
             # km_to_work_encoded,
             field_encoded,
-            hazards_encoded
-            #external_factor_1_encoded,
-            #external_factor_2_encoded,
-            #external_factor_3_encoded
+            hazards_encoded,
+            # external_factor_1_encoded,
+            # external_factor_2_encoded,
+            # external_factor_3_encoded
         ]
     )
     all_features_reg = 0

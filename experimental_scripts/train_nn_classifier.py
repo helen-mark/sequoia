@@ -4,7 +4,7 @@
           for Attrition Rate Project
 """
 import sys
-from os import path
+import os
 from pathlib import Path
 
 import eli5
@@ -18,8 +18,14 @@ import seaborn as sn
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from kerastuner import HyperModel
+# seqrh best model
+from kerastuner import Objective
 from kerastuner.tuners import BayesianOptimization
+
+# synthetic data
+from sdv.single_table import GaussianCopulaSynthesizer
+from sdv.metadata.single_table import SingleTableMetadata
+from sdv.evaluation.single_table import evaluate_quality
 
 sequoia = Path(__file__).parent.resolve()
 sys.path.append(sequoia)
@@ -120,10 +126,9 @@ def calculate_feature_importance(_model: K.Model, _train_dataframe: pd.DataFrame
 
 def build_model(_hp):  # function for automatic hyperparams tuning
     input_layers = {}
-    for feature in ['gender', 'department', 'citizenship', 'income_shortterm', 'income_longterm',
-                    'absenteeism_shortterm', 'absenteeism_longterm', 'vacation_days_shortterm',
-                    'vacation_days_longterm', 'overtime_shortterm', 'overtime_longterm', 'age', 'seniority',
-                    'external_factor_1', 'external_factor_2', 'external_factor_3']:
+    for feature in ['gender', 'department', 'citizenship', 'income_shortterm', 'absenteeism_shortterm', 'vacation_days_shortterm',
+                    'overtime_shortterm', 'age', 'seniority',
+                    'occupational_hazards']:
         input_layers[feature] = tf.keras.layers.Input(name=feature, shape=(1,))
 
     # Объединяем входные слои
@@ -138,7 +143,7 @@ def build_model(_hp):  # function for automatic hyperparams tuning
     model = tf.keras.models.Model(inputs=list(input_layers.values()), outputs=x)
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=_hp.Choice('learning_rate', values=[1e-1, 1e-2, 1e-3, 1e-4]))
-    model.compile(loss='binary_focal_crossentropy', optimizer=optimizer, metrics=['accuracy'])
+    model.compile(loss='binary_focal_crossentropy', optimizer=optimizer, metrics=['accuracy', K.metrics.Recall(), K.metrics.Precision()])
 
     return model
 
@@ -159,7 +164,7 @@ def create_model(_all_features_reg: tf.Tensor, _all_features_nonreg: tf.Tensor, 
     x = K.layers.Dropout(0.5)(x)
    # x = K.layers.Dense(n_neurons, activation="relu")(concat_layer)
     x = K.layers.Dense(n_neurons_hidden, activation="relu")(x)
-    x = K.layers.Dense(n_neurons_hidden/2, activation="relu")(x)
+    x = K.layers.Dense(int(n_neurons_hidden/2), activation="relu")(x)
     x = K.layers.Dropout(0.25)(x)
     output = K.layers.Dense(1, activation="sigmoid")(x)
 
@@ -170,25 +175,29 @@ def create_model(_all_features_reg: tf.Tensor, _all_features_nonreg: tf.Tensor, 
     return model
 
 
+def search_best_model(_dataset1: pd.DataFrame, _val_dataset: pd.DataFrame, _batch_size: int):
+    train_ds, val_ds, val_ds_2, train_dataframe, _ = create_dataset(_dataset1, _val_dataset, _batch_size)
+    all_features_reg, all_features_nonreg, all_inputs_reg, all_inputs_nonreg = prepare_all_features(train_ds)
+    tuner = BayesianOptimization(build_model,
+                             objective=['val_accuracy', Objective('val_recall', 'max'), Objective('val_precision', 'max')],
+                             max_trials=20,
+                             directory='my_dir',
+                             project_name='bayesian_tune')
+
+    # Обучение модели
+    tuner.search(train_ds, epochs=100,  validation_data=val_ds)
+
+    # Получение результатов
+    best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+    best_model = tuner.hypermodel.build(best_hps)
+    best_model.fit(train_ds, epochs=100,  validation_data=val_ds)
+
+
 def train(_dataset1: pd.DataFrame, _val_dataset: pd.DataFrame, _batch_size: int):
     train_ds, val_ds, val_ds_2, train_dataframe, _ = create_dataset(_dataset1, _val_dataset, _batch_size)
     all_features_reg, all_features_nonreg, all_inputs_reg, all_inputs_nonreg = prepare_all_features(train_ds)
     model = create_model(all_features_reg, all_features_nonreg, all_inputs_reg, all_inputs_nonreg)
 
-    # tuner = BayesianOptimization(build_model,
-    #                              objective='val_accuracy',
-    #                              max_trials=10,
-    #                              directory='my_dir',
-    #                              project_name='bayesian_tune')
-    #
-    # # Обучение модели
-    # tuner.search(train_ds,epochs=100,  validation_data=val_ds)
-    #
-    # # Получение результатов
-    # best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-    # best_model = tuner.hypermodel.build(best_hps)
-    # best_model.fit(train_ds,epochs=100,  validation_data=val_ds)
-    # print("Best hyperparam:", best_hps)
 
     tboard = K.callbacks.TensorBoard(
         log_dir="logs",
@@ -202,7 +211,7 @@ def train(_dataset1: pd.DataFrame, _val_dataset: pd.DataFrame, _batch_size: int)
         embeddings_metadata=None,
     )
     save_best = K.callbacks.ModelCheckpoint(
-        'best_keras_model',
+        'best.keras',
         monitor="val_loss",
         verbose=1,
         save_best_only=True,
@@ -222,7 +231,7 @@ def train(_dataset1: pd.DataFrame, _val_dataset: pd.DataFrame, _batch_size: int)
     # fit the keras model
     model.fit(train_ds, epochs=100, batch_size=_batch_size, validation_data=val_ds, callbacks=[tboard, save_best, scheduler])
 
-    best_model = K.models.load_model('best_keras_model')
+    best_model = K.models.load_model('best.keras')
     print(best_model.summary())
     # print('Evaluation...')
     # best_model.evaluate(val_ds)
@@ -232,7 +241,7 @@ def train(_dataset1: pd.DataFrame, _val_dataset: pd.DataFrame, _batch_size: int)
 
 
 def evaluation_and_matrix(_val_1: pd.DataFrame, _val_2: pd.DataFrame, _val_common: pd.DataFrame, _batch_size: int):
-    model = K.models.load_model('best_keras_model')
+    model = K.models.load_model('best.keras')
     print(model.summary())
     # evaluate on different production fields separately
     val_ds_1 = dataframe_to_dataset(_val_1)
@@ -240,8 +249,9 @@ def evaluation_and_matrix(_val_1: pd.DataFrame, _val_2: pd.DataFrame, _val_commo
     val_ds_2 = dataframe_to_dataset(_val_2)
     val_ds_2 = val_ds_2.batch(_batch_size)
 
-    print("evaluate on polimer...")
+    print("evaluate on polimerstroy...")
     model.evaluate(val_ds_1)
+    print("evaluate on sequoia...")
     model.evaluate(val_ds_2)
     # Predict
     val_ds = dataframe_to_dataset(_val_common)
@@ -265,30 +275,54 @@ def evaluation_and_matrix(_val_1: pd.DataFrame, _val_2: pd.DataFrame, _val_commo
     prec = precision_score(TRUE_LABELS, predicted_classes)
     print(recall, prec)
     sn.set(font_scale=1.4)  # for label size
-    sn.heatmap(result, annot=True, annot_kws={"size": 16})  # font size
+    sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='d')  # font size
 
     plt.show()
 
 
 if '__main__' == __name__:
-    dataset_path = 'data/sequoia_dataset.csv'
-    dataset2_path = 'data/polimer_dataset.csv'
+    data_path = 'data/'
+    datasets = []
+    d_val = []
+    d_train = []
+    d_test = []
+    for filename in os.listdir(data_path):
+        if '.csv' not in filename:
+            continue
+        dataset_path = os.path.join(data_path, filename)
+        print(filename)
+        dataset = pd.read_csv(dataset_path)
+        val = dataset.sample(frac=0.2, random_state=1337)
+        test = val  #.sample(frac=0.3, random_state=1337)
+        # val = val.drop(test.index)
+        trn = dataset.drop(val.index)
+        datasets.append(dataset)
+        d_val.append(val)
+        d_train.append(trn)
+        d_test.append(test)
 
-    dataset1 = pd.read_csv(dataset_path)
-    dataset2 = pd.read_csv(dataset2_path)
+    """ synthetic data """
+    dataset = pd.concat(datasets, axis=0)
+    md = SingleTableMetadata()
+    md.detect_from_dataframe(data=dataset)
+    synthesizer = GaussianCopulaSynthesizer(md)
+    synthesizer.fit(data=dataset)
+    synthetic_data = synthesizer.sample(num_rows=int(len(dataset)/2))
+    print(synthetic_data)
+    quality_report = evaluate_quality(
+        dataset,
+        synthetic_data,
+        md)
+    val_3 = synthetic_data.sample(frac=0.2, random_state=1337)
+    train_3 = synthetic_data.drop(val_3.index)
 
-    val_1 = dataset1.sample(frac=0.2, random_state=1337)
-    val_2 = dataset2.sample(frac=0.2, random_state=1337)
-    train_1 = dataset1.drop(val_1.index)
-    train_2 = dataset2.drop(val_2.index)
-
-    # dataset = pd.concat([dataset1, dataset2], axis=0)
-
-    val_dataframe = pd.concat([val_1, val_2], axis=0)  # dataset.sample(frac=0.2, random_state=1337)
-    train_dataframe = pd.concat([train_1, train_2], axis=0)  # dataset.drop(val_dataframe.index)
+    val_dataframe = pd.concat(d_val + [val_3], axis=0)  # dataset.sample(frac=0.2, random_state=1337)
+    train_dataframe = pd.concat(d_train + [train_3], axis=0)  # dataset.drop(val_dataframe.index)
+    # test_dataframe = pd.concat([test_1, test_2], axis=0)
 
     batch_size = 32
-    best_model = train(train_dataframe, val_dataframe, batch_size)
+    # best_model = train(train_dataframe, val_dataframe, batch_size)
+    # best_model = search_best_model(train_dataframe, val_dataframe, batch_size)
 
-    evaluation_and_matrix(val_1, val_2, val_dataframe,  batch_size)
+    evaluation_and_matrix(d_test[0], d_test[1], pd.concat(d_test, axis=0), batch_size)
 

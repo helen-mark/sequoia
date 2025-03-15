@@ -4,6 +4,10 @@
           for Attrition Rate Project
 """
 
+import os
+
+os.environ['YDATA_LICENSE_KEY'] = '97d0ae93-9dfc-4c2a-9183-a0420a4d0771'
+
 import pickle
 import warnings
 
@@ -15,12 +19,27 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder
+from catboost import CatBoostClassifier
 
-import os
+
+from pathlib import Path
+# from examples.local import setting_dask_env
+
+from ydata.connectors import LocalConnector
+from ydata.connectors.filetype import FileType
+from ydata.metadata import Metadata
+from ydata.synthesizers.regular.model import RegularSynthesizer
+from ydata.utils.formats import read_json
+from ydata.dataset.dataset import Dataset
+from dask.dataframe.io import from_pandas, from_array
+
+
 
 import seaborn as sn
 import matplotlib.pyplot as plt
+
+categorical_features = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
 
 
 def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
@@ -62,6 +81,44 @@ def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
     print(feature_importance_df)
 
     return best_model
+
+def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
+    # Инициализируем модель CatBoost
+    model = CatBoostClassifier(
+        iterations=1000,
+        learning_rate=0.01,
+        od_type='Iter',
+        od_wait=10,
+        depth=4,  # normally set it from 6 to 10
+        eval_metric='Accuracy',
+        random_seed=42,
+    )
+
+    grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9], 'od_wait': [5, 10, 20, 100], 'od_type': ['Iter', 'IncToDec']}
+    res = model.randomized_search(grid,
+                            X=_x_train,
+                            y=_y_train,
+                            n_iter=500,
+                            plot=True)
+    print(f"Best CatBoost params: {res}")
+    #
+    # print(_cat_feats_encoded)
+    # # Обучаем модель
+    # model.fit(
+    #     _x_train,  # признаки
+    #     _y_train,  # целевая переменная
+    #     eval_set=(_x_test, _y_test),
+    #     verbose=False
+    #     # plot=True,
+    #     # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
+    # )
+    predictions = model.predict(_x_test)
+
+    f1 = f1_score(_y_test, predictions)
+    recall = recall_score(_y_test, predictions)
+    precision = precision_score(_y_test, predictions)
+    print(f"CatBoost result: F1 = {f1}, Recall = {recall}, Precision - {precision}")
+    return model
 
 
 def train_random_forest_regression(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
@@ -140,7 +197,7 @@ def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight
     for iter in range(_num_iters):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            model.fit(_x_train, _y_train, sample_weight=_sample_weight)
+            model.fit(_x_train, _y_train)  #, sample_weight=_sample_weight)
         predictions = model.predict(_x_test)
 
         test_result['Precision'] = precision_score(_y_test, predictions)
@@ -176,7 +233,7 @@ def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight
 
 
 
-def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _model_name, _num_iters, _maximize):
+def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _model_name, _num_iters, _maximize):
     if _model_name == 'XGBoostClassifier':
         model = train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
     elif _model_name == 'RandomForestRegressor':
@@ -185,6 +242,8 @@ def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _model_name, _nu
         model = train_random_forest_regression(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
     elif _model_name == "RandomForestClassifier":
         model = train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
+    elif _model_name == "CatBoostClassifier":
+        model = train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters)
     else:
         print("Model name error: this model is not implemented yet!")
         return
@@ -195,8 +254,29 @@ def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _model_name, _nu
 def normalize(_data: pd.DataFrame):
     return _data.apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0)
 
+def make_synthetic(_dataset: pd.DataFrame):
+    connector = LocalConnector()  # , keyfile_dict=token)
 
-def prepare_dataset_2(_data_path: str):
+    # Instantiate a synthesizer
+    cardio_synth = RegularSynthesizer()
+    val = _dataset.sample(frac=0.3, random_state=1337)
+    test = val  # .sample(frac=0.3, random_state=1337)
+    trn = _dataset.drop(val.index)
+    # memory_usage = trn.memory_usage(index=True, deep=False).sum()
+    # npartitions = int(((memory_usage / 10e5) // 100) + 1)
+    data = Dataset(trn)
+    # calculating the metadata
+    metadata = Metadata(data)
+
+    # fit model to the provided data
+    cardio_synth.fit(data, metadata)
+
+    # Generate data samples by the end of the synth process
+    synth_sample = cardio_synth.sample(1000)
+    sample_df = synth_sample.to_pandas()  # {t: df.to_pandas() for t, df in res.items()}
+
+
+def prepare_dataset_2(_data_path: str, _make_synthetic: bool, _encode_categorical: bool):
     d_val = []
     d_train = []
     d_test = []
@@ -211,17 +291,53 @@ def prepare_dataset_2(_data_path: str):
         dataset = dataset.drop(
             columns=[c for c in dataset.columns if ('long' in c or 'external' in c or 'overtime' in c)])
         print("cols after", dataset.columns)
-        val = dataset.sample(frac=0.2, random_state=1337)
-        test = val  #.sample(frac=0.3, random_state=1337)
-        # val = val.drop(test.index)
-        trn = dataset.drop(val.index)
         datasets.append(dataset)
+
+    cat_feature_names = categorical_features
+
+    if _encode_categorical:
+        concat_dataset = pd.concat(datasets)
+        encoder = OneHotEncoder()
+        encoder.fit(concat_dataset[categorical_features])
+
+    n = 0
+    for dataset in datasets:
+        n += 1
+        if _make_synthetic:
+            sample_df = make_synthetic(dataset)
+
+        if _encode_categorical:
+            # Convert the encoded features to a DataFrame
+            encoded_features = encoder.transform(dataset[categorical_features]).toarray().astype(int)
+            encoded_df = pd.DataFrame(encoded_features, columns=encoder.get_feature_names_out(categorical_features))
+            numerical_part = dataset.drop(columns=categorical_features)
+            dataset = pd.concat([encoded_df, numerical_part], axis=1)
+
+            if _make_synthetic:
+                encoded_features_2 = encoder.transform(sample_df[categorical_features]).toarray().astype(int)
+                encoded_df_2 = pd.DataFrame(encoded_features_2, columns=encoder.get_feature_names_out(categorical_features))
+                numerical_part_2 = sample_df.drop(columns=categorical_features)
+                sample_df = pd.concat([encoded_df_2, numerical_part_2], axis=1)
+
+            cat_feature_names = encoded_df.columns.values
+
+        #val = dataset.loc[val.index] # dataset.sample(frac=0.3, random_state=1337)
+        #test = val  # .sample(frac=0.3, random_state=1337)
+        #trn = dataset.drop(val.index)
+        val = dataset.sample(frac=0.3, random_state=1337)
+        test = val  # .sample(frac=0.3, random_state=1337)
+        trn = dataset.drop(val.index)
+
+        if n == 0 and _make_synthetic:
+            trn = pd.concat([trn, sample_df], axis=0)
+        # val = val.drop(test.index)
+
         d_val.append(val)
         d_train.append(trn)
         d_test.append(test)
 
     dataset = pd.concat(datasets, axis=0)
-    return d_train, d_val, d_test
+    return d_train, d_val, d_test, cat_feature_names
 
 
 def prepare_dataset(_dataset: pd.DataFrame, _test_split: float, _normalize: bool):
@@ -302,7 +418,7 @@ def test(_model, _test_data):
         f1 = f1_score(trg, predictions)
         r = recall_score(trg, predictions)
         p = precision_score(trg, predictions)
-        print(f"test: F1={f1}, Recall={r}, Precision={p}")
+        print(f"test on {len(trg)} samples: F1={f1}, Recall={r}, Precision={p}")
 
         predicted_classes = predictions  # (np.array(predictions) > 0.5).astype(int)
         result = confusion_matrix(trg, predicted_classes)
@@ -310,13 +426,13 @@ def test(_model, _test_data):
         # prec = precision_score(trg, predicted_classes)
         # print(recall, prec)
         sn.set(font_scale=1.4)  # for label size
-        sn.heatmap(result, annot=True, annot_kws={"size": 16})  # font size
+        sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='d')  # font size
 
         plt.show()
 
 def main(_config: dict):
     data_path = config['dataset_src']
-    d_train, d_val, d_test = prepare_dataset_2(data_path)
+    d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(data_path, config['make_synthetic'], config['encode_categorical'])
 
     # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
     trn = pd.concat(d_train, axis=0).transpose()
@@ -326,6 +442,8 @@ def main(_config: dict):
     y_train = trn[-1:].transpose()
     y_val = vl[-1:].transpose()
 
+    print(f"X train: {x_train.shape[0]}, x_val: {x_val.shape[0]}, y_train: {y_train.shape[0]}, y_val: {y_val.shape[0]}")
+
     w_0, w_1 = 0, 0
     for i in y_val.values:
         w_0 += 1 - i
@@ -333,9 +451,9 @@ def main(_config: dict):
     # sample_weight = np.array([w_0.item() if i == 1 else w_1.item() for i in y_train.values])
     sample_weight = np.array([1 if i == 1 else 1 for i in y_val.values])
 
-    print(sample_weight)
+    # print(sample_weight)
     # Train model and save it:
-    trained_model = train(x_train, y_train, x_val, y_val, sample_weight, config['model'], config['num_iters'], config['maximize'])
+    trained_model = train(x_train, y_train, x_val, y_val, sample_weight, cat_feats_encoded, config['model'], config['num_iters'], config['maximize'])
     test(trained_model, d_test)
 
     if config['model'] == 'RandomForestClassifier':
@@ -349,12 +467,15 @@ def main(_config: dict):
 if __name__ == '__main__':
     # config_path = 'config.json'  # config file is used to store some parameters of the dataset
     config = {
-        'model': 'XGBoostClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier'
+        'model': 'CatBoostClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier', 'CatBoostClassifier'
         'test_split': 0.2,  # validation/training split proportion
         'normalize': False,  # normalize input values or not
         'num_iters': 5,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/'
+        'dataset_src': 'data/',
+        'encode_categorical': True,
+        'make_synthetic': False  # whether to use synthetic data
     }
     main(config)
 
+# 97d0ae93-9dfc-4c2a-9183-a0420a4d0771

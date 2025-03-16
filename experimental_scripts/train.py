@@ -86,32 +86,33 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
     # Инициализируем модель CatBoost
     model = CatBoostClassifier(
         iterations=1000,
-        learning_rate=0.01,
-        od_type='Iter',
-        od_wait=10,
-        depth=4,  # normally set it from 6 to 10
+        learning_rate=0.1,
+        od_type='IncToDec',
+        l2_leaf_reg=5,
+        od_wait=5,
+        depth=8,  # normally set it from 6 to 10
         eval_metric='Accuracy',
         random_seed=42,
     )
 
-    grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9], 'od_wait': [5, 10, 20, 100], 'od_type': ['Iter', 'IncToDec']}
-    res = model.randomized_search(grid,
-                            X=_x_train,
-                            y=_y_train,
-                            n_iter=500,
-                            plot=True)
-    print(f"Best CatBoost params: {res}")
-    #
-    # print(_cat_feats_encoded)
-    # # Обучаем модель
-    # model.fit(
-    #     _x_train,  # признаки
-    #     _y_train,  # целевая переменная
-    #     eval_set=(_x_test, _y_test),
-    #     verbose=False
-    #     # plot=True,
-    #     # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
-    # )
+    # grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9], 'od_wait': [5, 10, 20, 100], 'od_type': ['Iter', 'IncToDec']}
+    # res = model.randomized_search(grid,
+    #                         X=_x_train,
+    #                         y=_y_train,
+    #                         n_iter=500,
+    #                         plot=True)
+    # print(f"Best CatBoost params: {res}")
+
+    print(_cat_feats_encoded)
+    # Обучаем модель
+    model.fit(
+        _x_train,  # признаки
+        _y_train,  # целевая переменная
+        eval_set=(_x_test, _y_test),
+        verbose=False
+        # plot=True,
+        # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
+    )
     predictions = model.predict(_x_test)
 
     f1 = f1_score(_y_test, predictions)
@@ -430,26 +431,32 @@ def test(_model, _test_data):
 
         plt.show()
 
-def main(_config: dict):
-    data_path = config['dataset_src']
-    d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(data_path, config['make_synthetic'], config['encode_categorical'])
+def calc_weights(_y_train: pd.DataFrame, _y_val: pd.DataFrame):
+    w_0, w_1 = 0, 0
+    for i in _y_val.values:
+        w_0 += 1 - i
+        w_1 += i
+    # sample_weight = np.array([w_0.item() if i == 1 else w_1.item() for i in y_train.values])
+    return np.array([1 if i == 1 else 1 for i in _y_val.values])
 
-    # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
-    trn = pd.concat(d_train, axis=0).transpose()
-    vl = pd.concat(d_val, axis=0).transpose()
+def get_united_dataset(_d_train: list, _d_val: list, _d_test: list):
+    trn = pd.concat(_d_train, axis=0).transpose()
+    vl = pd.concat(_d_val, axis=0).transpose()
     x_train = trn[:-1].transpose()
     x_val = vl[:-1].transpose()
     y_train = trn[-1:].transpose()
     y_val = vl[-1:].transpose()
+    return x_train, y_train, x_val, y_val
+
+
+def main(_config: dict):
+    data_path = config['dataset_src']
+    d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(data_path, config['make_synthetic'], config['encode_categorical'])
+    x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test)
+    # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
 
     print(f"X train: {x_train.shape[0]}, x_val: {x_val.shape[0]}, y_train: {y_train.shape[0]}, y_val: {y_val.shape[0]}")
-
-    w_0, w_1 = 0, 0
-    for i in y_val.values:
-        w_0 += 1 - i
-        w_1 += i
-    # sample_weight = np.array([w_0.item() if i == 1 else w_1.item() for i in y_train.values])
-    sample_weight = np.array([1 if i == 1 else 1 for i in y_val.values])
+    sample_weight = calc_weights(y_train, y_val)
 
     # print(sample_weight)
     # Train model and save it:

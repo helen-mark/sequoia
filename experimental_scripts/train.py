@@ -34,15 +34,14 @@ from ydata.utils.formats import read_json
 from ydata.dataset.dataset import Dataset
 from dask.dataframe.io import from_pandas, from_array
 
-
-
 import seaborn as sn
 import matplotlib.pyplot as plt
 
-categorical_features = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
+CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
+SPLIT_RANDOM_STATE = 1337
 
 
-def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
+def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
     model = xgb.XGBClassifier(objective="binary:logistic", random_state=42, early_stopping_rounds=15, eval_set=[(_x_test, _y_test)])
     best_f1 = 0.
     best_model = model
@@ -83,19 +82,20 @@ def train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
     return best_model
 
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
-    # Инициализируем модель CatBoost
     model = CatBoostClassifier(
-        iterations=1000,
+        iterations=2000,  # default to 1000
         learning_rate=0.1,
         od_type='IncToDec',
         l2_leaf_reg=5,
         od_wait=5,
         depth=8,  # normally set it from 6 to 10
-        eval_metric='Accuracy',
+        eval_metric='F1',
         random_seed=42,
+        sampling_frequency='PerTreeLevel',
+        random_strength=2  # default: 1
     )
 
-    # grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9], 'od_wait': [5, 10, 20, 100], 'od_type': ['Iter', 'IncToDec']}
+    # grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9]}  #, 'od_wait': [5, 10, 20, 100]}, 'od_type': ['Iter', 'IncToDec']}
     # res = model.randomized_search(grid,
     #                         X=_x_train,
     #                         y=_y_train,
@@ -236,7 +236,7 @@ def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight
 
 def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _model_name, _num_iters, _maximize):
     if _model_name == 'XGBoostClassifier':
-        model = train_xgboost_classisier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
+        model = train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
     elif _model_name == 'RandomForestRegressor':
         model = train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
     elif _model_name == 'RandomForestRegressor_2':
@@ -260,8 +260,8 @@ def make_synthetic(_dataset: pd.DataFrame):
 
     # Instantiate a synthesizer
     cardio_synth = RegularSynthesizer()
-    val = _dataset.sample(frac=0.3, random_state=1337)
-    test = val  # .sample(frac=0.3, random_state=1337)
+    val = _dataset.sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
+    test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
     trn = _dataset.drop(val.index)
     # memory_usage = trn.memory_usage(index=True, deep=False).sum()
     # npartitions = int(((memory_usage / 10e5) // 100) + 1)
@@ -276,11 +276,13 @@ def make_synthetic(_dataset: pd.DataFrame):
     synth_sample = cardio_synth.sample(1000)
     sample_df = synth_sample.to_pandas()  # {t: df.to_pandas() for t, df in res.items()}
 
+def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
+    encoded_features = _encoder.transform(_dataset[CATEGORICAL_FEATURES]).toarray().astype(int)
+    encoded_df = pd.DataFrame(encoded_features, columns=_encoder.get_feature_names_out(CATEGORICAL_FEATURES))
+    numerical_part = _dataset.drop(columns=CATEGORICAL_FEATURES)
+    return pd.concat([encoded_df, numerical_part], axis=1), encoded_df
 
-def prepare_dataset_2(_data_path: str, _make_synthetic: bool, _encode_categorical: bool):
-    d_val = []
-    d_train = []
-    d_test = []
+def collect_datasets(_data_path: str):
     datasets = []
     for filename in os.listdir(_data_path):
         if '.csv' not in filename:
@@ -293,15 +295,22 @@ def prepare_dataset_2(_data_path: str, _make_synthetic: bool, _encode_categorica
             columns=[c for c in dataset.columns if ('long' in c or 'external' in c or 'overtime' in c)])
         print("cols after", dataset.columns)
         datasets.append(dataset)
+    return datasets
 
-    cat_feature_names = categorical_features
+def prepare_dataset_2(_data_path: str, _make_synthetic: bool, _encode_categorical: bool):
+    datasets = collect_datasets(_data_path)
+
+    cat_feature_names = CATEGORICAL_FEATURES
 
     if _encode_categorical:
         concat_dataset = pd.concat(datasets)
         encoder = OneHotEncoder()
-        encoder.fit(concat_dataset[categorical_features])
+        encoder.fit(concat_dataset[CATEGORICAL_FEATURES])
 
     n = 0
+    d_val = []
+    d_train = []
+    d_test = []
     for dataset in datasets:
         n += 1
         if _make_synthetic:
@@ -309,27 +318,21 @@ def prepare_dataset_2(_data_path: str, _make_synthetic: bool, _encode_categorica
 
         if _encode_categorical:
             # Convert the encoded features to a DataFrame
-            encoded_features = encoder.transform(dataset[categorical_features]).toarray().astype(int)
-            encoded_df = pd.DataFrame(encoded_features, columns=encoder.get_feature_names_out(categorical_features))
-            numerical_part = dataset.drop(columns=categorical_features)
-            dataset = pd.concat([encoded_df, numerical_part], axis=1)
+            dataset, encoded_part = encode_categorical(dataset, encoder)
 
             if _make_synthetic:
-                encoded_features_2 = encoder.transform(sample_df[categorical_features]).toarray().astype(int)
-                encoded_df_2 = pd.DataFrame(encoded_features_2, columns=encoder.get_feature_names_out(categorical_features))
-                numerical_part_2 = sample_df.drop(columns=categorical_features)
-                sample_df = pd.concat([encoded_df_2, numerical_part_2], axis=1)
+                sample_df, _ = encode_categorical(sample_df, encoder)
 
-            cat_feature_names = encoded_df.columns.values
+            cat_feature_names = encoded_part.columns.values
 
-        #val = dataset.loc[val.index] # dataset.sample(frac=0.3, random_state=1337)
-        #test = val  # .sample(frac=0.3, random_state=1337)
+        #val = dataset.loc[val.index] # dataset.sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
+        #test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
         #trn = dataset.drop(val.index)
-        val = dataset.sample(frac=0.3, random_state=1337)
-        test = val  # .sample(frac=0.3, random_state=1337)
+        val = dataset.sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
+        test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
         trn = dataset.drop(val.index)
 
-        if n == 0 and _make_synthetic:
+        if _make_synthetic:
             trn = pd.concat([trn, sample_df], axis=0)
         # val = val.drop(test.index)
 

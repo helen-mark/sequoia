@@ -20,6 +20,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, precision_score, recall_score, f1_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.model_selection import GridSearchCV
 from catboost import CatBoostClassifier
 
 
@@ -188,11 +189,25 @@ def train_random_forest_regr(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 
 
 def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
-    model = RandomForestClassifier(n_estimators=200)
-    best_precision = 0.
+    model = RandomForestClassifier(n_estimators=100,
+                                   max_depth=3,
+                                   max_features=1,
+                                   min_samples_leaf=7,
+                                   min_samples_split=7)
+    best_f1 = 0.
     best_model = model
 
     test_result = {}
+    # grid_space = {'max_depth': [3, 5, 10, None],
+    #               'n_estimators': [50, 100, 200],
+    #               'max_features': [1, 3, 5, 7, 9],
+    #               'min_samples_leaf': [1, 2, 3, 7],
+    #               'min_samples_split': [1, 2, 3, 7]
+    #               }
+    # grid = GridSearchCV(model, param_grid=grid_space, cv=3, scoring='f1')
+    # model_grid = grid.fit(_x_train, _y_train)
+    # print('Best hyperparameters are: ' + str(model_grid.best_params_))
+    # print('Best score is: ' + str(model_grid.best_score_))
 
     print(f"Fitting Random Forest classifier...")
     for iter in range(_num_iters):
@@ -205,30 +220,18 @@ def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight
         test_result['Recall'] = recall_score(_y_test, predictions)
         test_result['F1'] = f1_score(_y_test, predictions)
 
-        if test_result['Precision'] > best_precision:
-            best_precision = test_result['Precision']
+        if test_result['F1'] > best_f1:
+            best_f1 = test_result['F1']
             best_model = model
 
             test_result['Recall'] = recall_score(_y_test, predictions)
-            test_result['F1'] = f1_score(_y_test, predictions)
+            test_result['Precision'] = precision_score(_y_test, predictions)
 
     print(f"\nRandom Forest classifier best result: Recall = {test_result['Recall']}\nPrecision = {test_result['Precision']}\nF1 = {test_result['F1']}")
 
     feature_importance = best_model.feature_importances_
     feature_importance_df = pd.DataFrame({'Feature': _x_train.columns, 'Importance': feature_importance})
     print(feature_importance_df)
-
-    # dataset = read_csv('data/october_works.csv', delimiter=',')
-    # target_idx = -1  # index of "works/left" column
-    #
-    # dataset = dataset.transpose()
-    # trg = dataset[target_idx:].transpose()
-    # trn = dataset[:target_idx].transpose()
-    #
-    # pred = best_model.predict(trn)
-    # recall = recall_score(trg, pred)
-    # precision = precision_score(trg, pred)
-    # print("Recall:", recall, "Precision:", precision)
 
     return best_model
 
@@ -477,13 +480,13 @@ def main(_config: dict):
 if __name__ == '__main__':
     # config_path = 'config.json'  # config file is used to store some parameters of the dataset
     config = {
-        'model': 'CatBoostClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier', 'CatBoostClassifier'
+        'model': 'RandomForestClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier', 'CatBoostClassifier'
         'test_split': 0.2,  # validation/training split proportion
         'normalize': False,  # normalize input values or not
         'num_iters': 5,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
         'dataset_src': 'data/',
-        'encode_categorical': True,
+        'encode_categorical': False,
         'make_synthetic': False  # whether to use synthetic data
     }
     main(config)

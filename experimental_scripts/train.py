@@ -83,6 +83,7 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
     return best_model
 
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
+    # model already initialized with latest version of optimized parameters for our dataset
     model = CatBoostClassifier(
         iterations=2000,  # default to 1000
         learning_rate=0.1,
@@ -96,13 +97,14 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         random_strength=2  # default: 1
     )
 
-    # grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9]}  #, 'od_wait': [5, 10, 20, 100]}, 'od_type': ['Iter', 'IncToDec']}
-    # res = model.randomized_search(grid,
-    #                         X=_x_train,
-    #                         y=_y_train,
-    #                         n_iter=500,
-    #                         plot=True)
-    # print(f"Best CatBoost params: {res}")
+    # perform parameters optimization by grid search method
+    grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9]}  #, 'od_wait': [5, 10, 20, 100]}, 'od_type': ['Iter', 'IncToDec']}
+    res = model.randomized_search(grid,
+                            X=_x_train,
+                            y=_y_train,
+                            n_iter=500,
+                            plot=True)
+    print(f"Best CatBoost params: {res}")
 
     print(_cat_feats_encoded)
     # Обучаем модель
@@ -331,7 +333,7 @@ def prepare_dataset_2(_data_path: str, _make_synthetic: bool, _encode_categorica
         #val = dataset.loc[val.index] # dataset.sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
         #test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
         #trn = dataset.drop(val.index)
-        val = dataset.sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
+        val = dataset.sample(frac=0.2, random_state=SPLIT_RANDOM_STATE)
         test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
         trn = dataset.drop(val.index)
 
@@ -435,7 +437,7 @@ def test(_model, _test_data):
         sn.set(font_scale=1.4)  # for label size
         sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='d')  # font size
 
-        plt.show()
+        # plt.show()
 
 def calc_weights(_y_train: pd.DataFrame, _y_val: pd.DataFrame):
     w_0, w_1 = 0, 0
@@ -480,13 +482,13 @@ def main(_config: dict):
 if __name__ == '__main__':
     # config_path = 'config.json'  # config file is used to store some parameters of the dataset
     config = {
-        'model': 'RandomForestClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier', 'CatBoostClassifier'
+        'model': 'CatBoostClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier', 'CatBoostClassifier'
         'test_split': 0.2,  # validation/training split proportion
         'normalize': False,  # normalize input values or not
-        'num_iters': 5,  # number of fitting attempts
+        'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
         'dataset_src': 'data/',
-        'encode_categorical': False,
+        'encode_categorical': True,
         'make_synthetic': False  # whether to use synthetic data
     }
     main(config)

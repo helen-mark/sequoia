@@ -15,7 +15,9 @@ import os
 import seaborn as sn
 import matplotlib.pyplot as plt
 
-CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
+from utils.dataset import create_features_for_datasets, add_quality_features
+
+CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards', 'citizenship_gender', 'income_group', 'position_industry']
 
 def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
     encoded_features = _encoder.transform(_dataset[CATEGORICAL_FEATURES]).toarray().astype(int)
@@ -66,6 +68,7 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
         for filename in os.listdir(path):
             print(f"Loading file {filename}...")
             datasets.append(read_csv(os.path.join(path, filename)))
+        datasets = create_features_for_datasets(datasets)
         period_dataset = pd.concat(datasets, axis=0)
         print(len(period_dataset))
 
@@ -122,6 +125,7 @@ if __name__ == '__main__':
         print(f"Loading file {filename}...")
         datasets.append(read_csv(os.path.join(config["test_data_path"], filename)))
 
+    datasets = create_features_for_datasets(datasets)
     dataset = pd.concat(datasets, axis=0)
 
     encoder = OneHotEncoder()
@@ -129,7 +133,7 @@ if __name__ == '__main__':
     dataset = dataset.reset_index()
     dataset, cat_feature_names = encode_categorical(dataset, encoder)
 
-    test_rowwise(model, dataset)
+    # test_rowwise(model, dataset)
 
     print("Test on each dataset separately...")
     for dataset in datasets:

@@ -39,7 +39,14 @@ from dask.dataframe.io import from_pandas, from_array
 import seaborn as sn
 import matplotlib.pyplot as plt
 
-CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
+from utils.dataset import create_features_for_datasets, add_quality_features
+
+CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards', 'citizenship_gender', 'income_group', 'position_industry']
+# industry_avg_income = df.groupby('field')['income_shortterm'].mean().to_dict()
+# df['industry_avg_income'] = df['field'].map(industry_avg_income)
+# df['income_vs_industry'] = df['income_shortterm'] - df['industry_avg_income']
+# position_median_income = df.groupby('department')['income_shortterm'].median().to_dict()
+# df['position_median_income'] = df['department'].map(position_median_income)
 
 
 def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
@@ -91,7 +98,7 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         l2_leaf_reg=5,
         od_wait=5,
         depth=8,  # normally set it from 6 to 10
-        eval_metric='F1',
+        eval_metric='Accuracy',
         random_seed=42,
         sampling_frequency='PerTreeLevel',
         random_strength=2  # default: 1
@@ -256,25 +263,30 @@ def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encod
 def normalize(_data: pd.DataFrame):
     return _data.apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0)
 
-def make_synthetic(_dataset: pd.DataFrame, _split_rand_state: int, _size: int = 1000):
+def make_synthetic(_dataset: pd.DataFrame, _size: int = 1000):
     connector = LocalConnector()  # , keyfile_dict=token)
 
     # Instantiate a synthesizer
     cardio_synth = RegularSynthesizer()
-    val = _dataset.sample(frac=0.3, random_state=_split_rand_state)
-    test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
-    trn = _dataset.drop(val.index)
     # memory_usage = trn.memory_usage(index=True, deep=False).sum()
     # npartitions = int(((memory_usage / 10e5) // 100) + 1)
-    data = Dataset(trn)
+    data = Dataset(_dataset)
     # calculating the metadata
     metadata = Metadata(data)
 
     # fit model to the provided data
-    cardio_synth.fit(data, metadata)
+    cardio_synth.fit(data, metadata, condition_on=["status"])
 
     # Generate data samples by the end of the synth process
-    synth_sample = cardio_synth.sample(_size)
+    synth_sample = cardio_synth.sample(n_samples=_size,
+                                       condition_on={
+                                        "status": {
+                                            "categories": [{
+                                                "category": 0,
+                                                "percentage": 0.6
+                                            }]
+                                        }}
+                                       )
 
     # TODO target variable validation
     profile = SyntheticDataProfile(
@@ -319,18 +331,28 @@ def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorica
         encoder = OneHotEncoder()
         encoder.fit(concat_dataset[CATEGORICAL_FEATURES])
 
-    if _make_synthetic:
-        united = pd.concat(_datasets, axis=0)
-        sample_df = make_synthetic(united, _split_rand_state, 1000)
+    # if _make_synthetic:
+    #     united = pd.concat(_datasets, axis=0)
+    #     sample_df = make_synthetic(united, _split_rand_state, 1000)
+    #
+    #     # Check for similar rows and print if match:
+    #     for n, syn_row in sample_df.iterrows():
+    #         for n1, real_row in united.iterrows():
+    #             if (syn_row.values.astype(int) == real_row.values.astype(int)).all():
+    #                 print("Match!", real_row.values.astype(int), syn_row.values.astype(int))
+    #
+    #     if _encode_categorical:
+    #         sample_df, _ = encode_categorical(sample_df, encoder)
 
-        # Check for similar rows and print if match:
-        for n, syn_row in sample_df.iterrows():
-            for n1, real_row in united.iterrows():
-                if (syn_row.values.astype(int) == real_row.values.astype(int)).all():
-                    print("Match!", real_row.values.astype(int), syn_row.values.astype(int))
-
-        if _encode_categorical:
-            sample_df, _ = encode_categorical(sample_df, encoder)
+    # if _make_synthetic:
+    #   trns = []
+    #   for d in _datasets:
+    #       val = d.sample(frac=_test_split, random_state=_split_rand_state)
+    #       trn = d.drop(val.index)
+    #       trns.append(trn)
+    #   sample_trn = make_synthetic(pd.concat(trns, axis=0), 1000)
+    #   if _encode_categorical:
+    #       sample_trn, _ = encode_categorical(sample_trn, encoder)
 
     n = 0
     d_val = []
@@ -340,30 +362,39 @@ def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorica
         n += 1
         # if _make_synthetic:
         #     sample_df = make_synthetic(dataset)
+        if _make_synthetic:
+            val = dataset.sample(frac=_test_split, random_state=_split_rand_state)
+            trn = dataset.drop(val.index)
+            sample_trn = make_synthetic(trn, len(trn))
+
+            #
+            #     # Check for similar rows and print if match:
+            #     for n, syn_row in sample_df.iterrows():
+            #         for n1, real_row in united.iterrows():
+            #             if (syn_row.values.astype(int) == real_row.values.astype(int)).all():
+            #                 print("Match!", real_row.values.astype(int), syn_row.values.astype(int))
 
         if _encode_categorical:
             # Convert the encoded features to a DataFrame
             dataset, encoded_part = encode_categorical(dataset, encoder)
-
+            if _make_synthetic:
+                sample_trn, _ = encode_categorical(sample_trn, encoder)
             cat_feature_names = encoded_part.columns.values
 
-        #val = dataset.loc[val.index] # dataset.sample(frac=0.3, random_state=_split_rand_state)
-        #test = val  # .sample(frac=0.3, random_state=_split_rand_state)
-        #trn = dataset.drop(val.index)
+
         val = dataset.sample(frac=_test_split, random_state=_split_rand_state)
         test = val  # .sample(frac=0.3, random_state=_split_rand_state)
-        trn = dataset.drop(val.index)
-
-        # if _make_synthetic:
-        #     trn = pd.concat([trn, sample_df], axis=0)
         # val = val.drop(test.index)
+        trn = dataset.drop(val.index)
+        if _make_synthetic:
+            trn = pd.concat([trn, sample_trn], axis=0)
 
         d_val.append(val)
         d_train.append(trn)
         d_test.append(test)
 
-    if _make_synthetic:
-        d_train[0] = pd.concat([d_train[0], sample_df], axis=0)
+    # if _make_synthetic:
+    #     d_train[0] = pd.concat([d_train[0], sample_trn], axis=0)
     return d_train, d_val, d_test, cat_feature_names
 
 
@@ -471,9 +502,6 @@ def test(_model, _test_data):
 
         predicted_classes = predictions  # (np.array(predictions) > 0.5).astype(int)
         result = confusion_matrix(trg, predicted_classes)
-        # recall = recall_score(trg, predicted_classes)
-        # prec = precision_score(trg, predicted_classes)
-        # print(recall, prec)
         sn.set(font_scale=1.4)  # for label size
         sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='d')  # font size
 
@@ -491,8 +519,8 @@ def calc_weights(_y_train: pd.DataFrame, _y_val: pd.DataFrame):
     w_0 = w_0 / tot
     w_1 = w_1 / tot
     print(f"weights:", w_0, w_1)
-    return np.array([w_0 if i == 1 else w_1 for i in _y_train.values])
-    # return np.array([1 if i == 1 else 1 for i in _y_val.values])
+    #return np.array([w_0 if i == 1 else w_1 for i in _y_train.values])
+    return np.array([1 if i == 1 else 1 for i in _y_train.values])
 
 def get_united_dataset(_d_train: list, _d_val: list, _d_test: list, _make_synthetic: bool):
     trn = pd.concat(_d_train, axis=0)
@@ -511,8 +539,10 @@ def get_united_dataset(_d_train: list, _d_val: list, _d_test: list, _make_synthe
 def main(_config: dict):
     data_path = config['dataset_src']
     datasets = collect_datasets(data_path)
-    rand_states = [42, 777, 6, 1370, 5087]
+    rand_states = [42]  # , 6, 1370, 5087, 777]
     score = [0, 0, 0]
+    if _config['calculated_features']:
+        datasets = create_features_for_datasets(datasets)
 
     for split_rand_state in rand_states:
         d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(datasets, config['make_synthetic'], config['encode_categorical'], config['test_split'], split_rand_state)
@@ -552,8 +582,38 @@ if __name__ == '__main__':
         'maximize': 'Precision',  # metric to maximize
         'dataset_src': 'data/2223',
         'encode_categorical': True,
-        'make_synthetic': False  # whether to use synthetic data
+        'calculated_features': True,
+        'make_synthetic': True  # whether to use synthetic data
     }
     main(config)
 
 # 97d0ae93-9dfc-4c2a-9183-a0420a4d0771
+
+# On separate trains, not weighted:
+#Final score of cross-val: F1=0.8545034642032333, Recall = 0.8409090909090909, Precision=0.8685446009389671
+#Final score of cross-val: F1=0.8663594470046083, Recall = 0.8355555555555556, Precision=0.8995215311004785
+#Final score of cross-val: F1=0.8379629629629629, Recall = 0.8302752293577982, Precision=0.8457943925233645
+#Final score of cross-val: F1=0.8257756563245824, Recall = 0.7972350230414746, Precision=0.8564356435643564
+#Final score of cross-val: F1=0.8374164810690423, Recall = 0.8138528138528138, Precision=0.8623853211009175
+# F1 = 0.844  # With no synthetic: 0.8433 # No synth and no calculated features: 0.829
+
+# not weighted synthetic on united train:
+#Final score of cross-val: F1=0.8159645232815964, Recall = 0.7965367965367965, Precision=0.8363636363636363
+#Final score of cross-val: F1=0.851063829787234, Recall = 0.8181818181818182, Precision=0.8866995073891626
+#Final score of cross-val: F1=0.8306264501160093, Recall = 0.7955555555555556, Precision=0.8689320388349514
+#Final score of cross-val: F1=0.8443396226415094, Recall = 0.8211009174311926, Precision=0.8689320388349514
+# F1 = 0.834
+
+# Weighted synthetic on united train:
+# Final score of cross-val: F1=0.8393285371702638, Recall = 0.8064516129032258, Precision=0.875
+#Final score of cross-val: F1=0.8351648351648352, Recall = 0.8225108225108225, Precision=0.8482142857142857
+#Final score of cross-val: F1=0.8403755868544601, Recall = 0.8136363636363636, Precision=0.8689320388349514
+#Final score of cross-val: F1=0.8466819221967964, Recall = 0.8222222222222222, Precision=0.8726415094339622
+#F1 = 0.84
+
+#Weighted on separate trains:
+#Final score of cross-val: F1=0.8433179723502304, Recall = 0.8394495412844036, Precision=0.8472222222222222
+#Final score of cross-val: F1=0.8658823529411764, Recall = 0.847926267281106, Precision=0.8846153846153846
+#Final score of cross-val: F1=0.8232662192393736, Recall = 0.7965367965367965, Precision=0.8518518518518519
+#Final score of cross-val: F1=0.8436018957345972, Recall = 0.8090909090909091, Precision=0.8811881188118812
+# F1 = 0.8435

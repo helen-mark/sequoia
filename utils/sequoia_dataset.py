@@ -270,17 +270,12 @@ class SequoiaDataset:
         pass
 
     def age_from_birth_date(self, _dataset: pd.DataFrame):
-        cur_date_col = _dataset['termination_date']
-        for i, d in enumerate(cur_date_col.values):
-            if pd.isnull(d):
-                cur_date_col[i] = self.data_load_date
-
-        def calc_age(_birth_date: datetime.date):
-            if pd.isnull(_birth_date):
-                _birth_date = date(year=1975, month=1, day=1)
-            return (self.str_to_datetime(self.data_load_date) - _birth_date).days / 365.
-
-        age_col = _dataset['birth_date'].apply(calc_age)
+        default_date = date(year=1975, month=1, day=1)
+        _dataset['birth_date'] = _dataset['birth_date'].fillna(default_date)
+        bd_col = pd.to_datetime(_dataset['birth_date'])
+        cur_date_col = pd.to_datetime(_dataset['termination_date'])
+        age_col = (cur_date_col - bd_col).dt.days / 365.
+        print(f"Age col: {age_col}")
         _dataset = _dataset.insert(len(_dataset.columns), 'age', age_col)
         return
 
@@ -290,7 +285,6 @@ class SequoiaDataset:
         statuses = []
         for i, d in enumerate(cur_date_col.values):
             if pd.isnull(d) or d == self.str_to_datetime(self.data_load_date):  # no termination date - person still working
-                cur_date_col[i] = self.str_to_datetime(self.data_load_date)
                 statuses.append(0)
             else:
                 statuses.append(1)
@@ -299,22 +293,18 @@ class SequoiaDataset:
 
 
     def seniority_from_term_date(self, _dataset: pd.DataFrame):
-        cur_date_col = _dataset['termination_date']
-        for i, d in enumerate(cur_date_col.values):
-            if pd.isnull(d):
-                cur_date_col[i] = self.data_load_date
+        cur_date_col = pd.to_datetime(_dataset['termination_date'])
+        recr_date_col = pd.to_datetime(_dataset['recruitment_date'])
+        seniority_col = (cur_date_col - recr_date_col).dt.days / 365.
+        print(f"Seniority col: {seniority_col}")
 
-        def calc_period(_start_date: date):
-            return (self.str_to_datetime(self.data_load_date) - _start_date).days / 365.
-
-        col = _dataset['recruitment_date'].apply(calc_period)
-        _dataset.insert(len(_dataset.columns), 'seniority', col)
+        _dataset.insert(len(_dataset.columns), 'seniority', seniority_col)
         return
 
     def calc_individual_snapshot_start(self, _snapshot: SnapShot, _start_date: date, _end_date: date):
         initial_offset = _snapshot.initial_offset
         empl_period = (_end_date - _start_date).days / 30
-        if empl_period - _snapshot.total_offset() < _snapshot.min_duration:  # person worken for very short period
+        if empl_period - _snapshot.total_offset() < _snapshot.min_duration:  # person worked for very short period
             initial_offset = 0
             snapshot_start = _end_date
             return snapshot_start
@@ -360,7 +350,8 @@ class SequoiaDataset:
     def prepare_sample(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _code: int):
         sample = _feature_df.loc[_feature_df['code'] == _code]
         if sample.empty:
-            logging.info(f"Code {_code} is not present in feature dataframe! Empty sample")
+            print(_code)
+            # logging.info(f"Code {_code} is not present in feature dataframe! Empty sample")
         sample = sample.drop(columns='code')  # leave ony columns with salary values
         # person_recruitment_date = _dataset.loc[_dataset['code'] == _code]['recruitment_date'].item()
         # person_termination_date = _dataset.loc[_dataset['code'] == _code]['termination_date'].item()
@@ -444,7 +435,7 @@ class SequoiaDataset:
         logging.info(f'Processing continuous feature: {_feature_name}')
         for n, row in _dataset.iterrows():
             code = row['code']
-            person_termination_date = self.sample_presets[code].recr_date
+            person_termination_date = self.sample_presets[code].term_date
             snapshot_timepoint = self.sample_presets[code].snapshot_start
             value = _dataset.loc[_dataset['code'] == code][_feature_name]
             value = value.replace(',', '.', regex=True).astype(float).item()
@@ -623,7 +614,10 @@ class SequoiaDataset:
                 row['Date of dismissal'] = self.data_load_date
                 term_date = row['Date of dismissal']
                 _input_df.loc[n] = row
-            empl_period = (self.str_to_datetime(term_date)-self.str_to_datetime(recr_date)).days / 30
+
+            recr_date = self.str_to_datetime(recr_date)
+            term_date = self.str_to_datetime(term_date)
+            empl_period = (term_date-recr_date).days / 30
             # remove sample if it has no data for current time snapshot:
 
             if self.remove_short_service:
@@ -631,14 +625,20 @@ class SequoiaDataset:
                     # print(code)  # , recr_date, term_date, f"({int(empl_period)} months)")
                     _input_df = _input_df.drop(axis='index', labels=n)
                     deleted_count += 1
-                elif (self.str_to_datetime(term_date) - self.data_begin_date).days / 30 - _snapshot.total_offset() <= _snapshot.min_duration:
+                elif (term_date - self.data_begin_date).days / 30 - _snapshot.total_offset() <= _snapshot.min_duration:
                     _input_df = _input_df.drop(axis='index', labels=n)
                     deleted_count += 1
-            # elif _snapshot.num > 0 and row['Status'] == 0:  # the employee is dismissed - don't include them into past snapshots
+
+            # cut out employees with employment behind chosen data pediod:
+            if recr_date >= self.str_to_datetime(self.data_load_date) or term_date < self.data_begin_date:
+                _input_df = _input_df.drop(axis='index', labels=n)
+                deleted_count += 1
+
+                # elif _snapshot.num > 0 and row['Status'] == 0:  # the employee is dismissed - don't include them into past snapshots
             #     _input_df = _input_df.drop(axis='index', labels=n)
             #     deleted_count += 1
 
-                logging.info(f"Attention! {deleted_count} rows removed because of short working period")
+        logging.info(f"Attention! {deleted_count} rows removed because of short OR not actual working period")
 
         if _input_df.empty:
             snapshot_dataset = None
@@ -679,8 +679,8 @@ class SequoiaDataset:
 
 
     def calibrate_by_inflation(self, _salary: int, _date: date):
-        gold_rate = pd.read_excel('data_raw/Инфляция_накопительная.xlsx', sheet_name='Sheet3')
-        values = gold_rate.loc[gold_rate['Год'] == _date.year].drop(columns='Год').values
+        rate = pd.read_excel('data_raw/Инфляция_накопительная.xlsx', sheet_name='Sheet3')
+        values = rate.loc[rate['Год'] == _date.year].drop(columns='Год').values
         value = values[0][_date.month - 1]
         return _salary * value
 
@@ -769,7 +769,7 @@ class SequoiaDataset:
         # united_dataset = united_dataset.drop(axis='index', labels=rows_to_drop)
 
         united_dataset = united_dataset.sort_values(by='code')  # sorting by code helps further splitting to train/val, keeping snapshots of each person in the same set to prevent data leakage
-        united_dataset = united_dataset.drop(columns=['recruitment_date', 'termination_date', 'code', 'birth_date'], errors='ignore')
+        # united_dataset = united_dataset.drop(columns=['recruitment_date', 'termination_date', 'code', 'birth_date'], errors='ignore')
 
         united_dataset.insert(0, 'field', self.get_industry_label())
         cols = united_dataset.columns.tolist()

@@ -33,13 +33,13 @@ from ydata.metadata import Metadata
 from ydata.synthesizers.regular.model import RegularSynthesizer
 from ydata.utils.formats import read_json
 from ydata.dataset.dataset import Dataset
+from ydata.report import SyntheticDataProfile
 from dask.dataframe.io import from_pandas, from_array
 
 import seaborn as sn
 import matplotlib.pyplot as plt
 
 CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
-SPLIT_RANDOM_STATE = 1337
 
 
 def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters):
@@ -98,30 +98,26 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
     )
 
     # perform parameters optimization by grid search method
-    grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9]}  #, 'od_wait': [5, 10, 20, 100]}, 'od_type': ['Iter', 'IncToDec']}
-    res = model.randomized_search(grid,
-                            X=_x_train,
-                            y=_y_train,
-                            n_iter=500,
-                            plot=True)
-    print(f"Best CatBoost params: {res}")
+    # grid = {'learning_rate': [0.03, 0.1, 0.01, 0.003], 'depth': [4,6,8,10], 'l2_leaf_reg': [1, 3, 5, 7, 9]}  #, 'od_wait': [5, 10, 20, 100]}, 'od_type': ['Iter', 'IncToDec']}
+    # res = model.randomized_search(grid,
+    #                         X=_x_train,
+    #                         y=_y_train,
+    #                         n_iter=500,
+    #                         plot=True)
+    # print(f"Best CatBoost params: {res}")
 
     print(_cat_feats_encoded)
-    # Обучаем модель
     model.fit(
-        _x_train,  # признаки
-        _y_train,  # целевая переменная
+        _x_train,
+        _y_train,
         eval_set=(_x_test, _y_test),
-        verbose=False
+        verbose=False,
+        sample_weight=_sample_weight,
         # plot=True,
         # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
     )
-    predictions = model.predict(_x_test)
+    print("Feature importance:", model.get_feature_importance(prettified=True))
 
-    f1 = f1_score(_y_test, predictions)
-    recall = recall_score(_y_test, predictions)
-    precision = precision_score(_y_test, predictions)
-    print(f"CatBoost result: F1 = {f1}, Recall = {recall}, Precision - {precision}")
     return model
 
 
@@ -260,12 +256,12 @@ def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encod
 def normalize(_data: pd.DataFrame):
     return _data.apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0)
 
-def make_synthetic(_dataset: pd.DataFrame):
+def make_synthetic(_dataset: pd.DataFrame, _split_rand_state: int, _size: int = 1000):
     connector = LocalConnector()  # , keyfile_dict=token)
 
     # Instantiate a synthesizer
     cardio_synth = RegularSynthesizer()
-    val = _dataset.sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
+    val = _dataset.sample(frac=0.3, random_state=_split_rand_state)
     test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
     trn = _dataset.drop(val.index)
     # memory_usage = trn.memory_usage(index=True, deep=False).sum()
@@ -278,8 +274,20 @@ def make_synthetic(_dataset: pd.DataFrame):
     cardio_synth.fit(data, metadata)
 
     # Generate data samples by the end of the synth process
-    synth_sample = cardio_synth.sample(1000)
-    sample_df = synth_sample.to_pandas()  # {t: df.to_pandas() for t, df in res.items()}
+    synth_sample = cardio_synth.sample(_size)
+
+    # TODO target variable validation
+    profile = SyntheticDataProfile(
+        data,
+        synth_sample,
+        metadata=metadata,
+        target="status",
+        data_types=cardio_synth.data_types)
+
+    profile.generate_report(
+        output_path="./cardio_report_example.pdf",
+    )
+    return synth_sample.to_pandas()  # {t: df.to_pandas() for t, df in res.items()}
 
 def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
     encoded_features = _encoder.transform(_dataset[CATEGORICAL_FEATURES]).toarray().astype(int)
@@ -296,56 +304,66 @@ def collect_datasets(_data_path: str):
         print(filename)
         dataset = pd.read_csv(dataset_path)
         print("cols before", dataset.columns)
+        strings_to_drop = ['long',"birth","code",'external','overtime','termination','recruit']
         dataset = dataset.drop(
-            columns=[c for c in dataset.columns if ('long' in c or 'external' in c or 'overtime' in c)])
+            columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
         print("cols after", dataset.columns)
         datasets.append(dataset)
     return datasets
 
-def prepare_dataset_2(_data_path: str, _make_synthetic: bool, _encode_categorical: bool):
-    datasets = collect_datasets(_data_path)
-
+def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorical: bool, _test_split: float, _split_rand_state: int):
     cat_feature_names = CATEGORICAL_FEATURES
 
     if _encode_categorical:
-        concat_dataset = pd.concat(datasets)
+        concat_dataset = pd.concat(_datasets)
         encoder = OneHotEncoder()
         encoder.fit(concat_dataset[CATEGORICAL_FEATURES])
+
+    if _make_synthetic:
+        united = pd.concat(_datasets, axis=0)
+        sample_df = make_synthetic(united, _split_rand_state, 1000)
+
+        # Check for similar rows and print if match:
+        for n, syn_row in sample_df.iterrows():
+            for n1, real_row in united.iterrows():
+                if (syn_row.values.astype(int) == real_row.values.astype(int)).all():
+                    print("Match!", real_row.values.astype(int), syn_row.values.astype(int))
+
+        if _encode_categorical:
+            sample_df, _ = encode_categorical(sample_df, encoder)
 
     n = 0
     d_val = []
     d_train = []
     d_test = []
-    for dataset in datasets:
+    for dataset in _datasets:
         n += 1
-        if _make_synthetic:
-            sample_df = make_synthetic(dataset)
+        # if _make_synthetic:
+        #     sample_df = make_synthetic(dataset)
 
         if _encode_categorical:
             # Convert the encoded features to a DataFrame
             dataset, encoded_part = encode_categorical(dataset, encoder)
 
-            if _make_synthetic:
-                sample_df, _ = encode_categorical(sample_df, encoder)
-
             cat_feature_names = encoded_part.columns.values
 
-        #val = dataset.loc[val.index] # dataset.sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
-        #test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
+        #val = dataset.loc[val.index] # dataset.sample(frac=0.3, random_state=_split_rand_state)
+        #test = val  # .sample(frac=0.3, random_state=_split_rand_state)
         #trn = dataset.drop(val.index)
-        val = dataset.sample(frac=0.2, random_state=SPLIT_RANDOM_STATE)
-        test = val  # .sample(frac=0.3, random_state=SPLIT_RANDOM_STATE)
+        val = dataset.sample(frac=_test_split, random_state=_split_rand_state)
+        test = val  # .sample(frac=0.3, random_state=_split_rand_state)
         trn = dataset.drop(val.index)
 
-        if _make_synthetic:
-            trn = pd.concat([trn, sample_df], axis=0)
+        # if _make_synthetic:
+        #     trn = pd.concat([trn, sample_df], axis=0)
         # val = val.drop(test.index)
 
         d_val.append(val)
         d_train.append(trn)
         d_test.append(test)
 
-    dataset = pd.concat(datasets, axis=0)
+    if _make_synthetic:
+        d_train[0] = pd.concat([d_train[0], sample_df], axis=0)
     return d_train, d_val, d_test, cat_feature_names
 
 
@@ -419,6 +437,28 @@ def show_decision_tree(_model):
 
 
 def test(_model, _test_data):
+    test_data_all = pd.concat(_test_data, axis=0)
+    t = test_data_all.transpose()
+    trg = t[-1:].transpose()
+    trn = t[:-1].transpose()
+    threshold = 0.5
+
+    print(f"Testing on united data with threshold = {threshold}...")
+    predictions = _model.predict_proba(trn)
+    predictions = (predictions[:, 1] > threshold).astype(int)
+
+    f1_united = f1_score(trg, predictions)
+    recall_united = recall_score(trg, predictions)
+    precision_united = precision_score(trg, predictions)
+    print(f"CatBoost result: F1 = {f1_united}, Recall = {recall_united}, Precision - {precision_united}")
+    result = confusion_matrix(trg, predictions)
+    sn.set(font_scale=1.4)  # for label size
+    sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='d')  # font size
+
+    plt.show()
+    plt.clf()
+
+    print("Testing separately...")
     for t in _test_data:
         t = t.transpose()
         trg = t[-1:].transpose()
@@ -438,18 +478,29 @@ def test(_model, _test_data):
         sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='d')  # font size
 
         # plt.show()
+    plt.clf()
+    return f1_united, recall_united, precision_united
 
 def calc_weights(_y_train: pd.DataFrame, _y_val: pd.DataFrame):
     w_0, w_1 = 0, 0
-    for i in _y_val.values:
-        w_0 += 1 - i
-        w_1 += i
-    # sample_weight = np.array([w_0.item() if i == 1 else w_1.item() for i in y_train.values])
-    return np.array([1 if i == 1 else 1 for i in _y_val.values])
+    for i in _y_train.values:
+        w_0 += 1 - i.item()
+        w_1 += i.item()
 
-def get_united_dataset(_d_train: list, _d_val: list, _d_test: list):
-    trn = pd.concat(_d_train, axis=0).transpose()
-    vl = pd.concat(_d_val, axis=0).transpose()
+    tot = w_0 + w_1
+    w_0 = w_0 / tot
+    w_1 = w_1 / tot
+    print(f"weights:", w_0, w_1)
+    return np.array([w_0 if i == 1 else w_1 for i in _y_train.values])
+    # return np.array([1 if i == 1 else 1 for i in _y_val.values])
+
+def get_united_dataset(_d_train: list, _d_val: list, _d_test: list, _make_synthetic: bool):
+    trn = pd.concat(_d_train, axis=0)
+    vl = pd.concat(_d_val, axis=0)
+
+    trn = trn.transpose()
+    vl = vl.transpose()
+
     x_train = trn[:-1].transpose()
     x_val = vl[:-1].transpose()
     y_train = trn[-1:].transpose()
@@ -459,20 +510,32 @@ def get_united_dataset(_d_train: list, _d_val: list, _d_test: list):
 
 def main(_config: dict):
     data_path = config['dataset_src']
-    d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(data_path, config['make_synthetic'], config['encode_categorical'])
-    x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test)
-    # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
+    datasets = collect_datasets(data_path)
+    rand_states = [42, 777, 6, 1370, 5087]
+    score = [0, 0, 0]
 
-    print(f"X train: {x_train.shape[0]}, x_val: {x_val.shape[0]}, y_train: {y_train.shape[0]}, y_val: {y_val.shape[0]}")
-    sample_weight = calc_weights(y_train, y_val)
+    for split_rand_state in rand_states:
+        d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(datasets, config['make_synthetic'], config['encode_categorical'], config['test_split'], split_rand_state)
 
-    # print(sample_weight)
-    # Train model and save it:
-    trained_model = train(x_train, y_train, x_val, y_val, sample_weight, cat_feats_encoded, config['model'], config['num_iters'], config['maximize'])
-    test(trained_model, d_test)
+        x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test, config['make_synthetic'])
+        # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
 
-    if config['model'] == 'RandomForestClassifier':
-       show_decision_tree(trained_model)
+        print(f"X train: {x_train.shape[0]}, x_val: {x_val.shape[0]}, y_train: {y_train.shape[0]}, y_val: {y_val.shape[0]}")
+        print(y_train)
+        sample_weight = calc_weights(y_train, y_val)
+
+        # print(sample_weight)
+        trained_model = train(x_train, y_train, x_val, y_val, sample_weight, cat_feats_encoded, config['model'], config['num_iters'], config['maximize'])
+        f1, r, p = test(trained_model, d_test)
+        score[0] += f1
+        score[1] += r
+        score[2] += p
+
+        if config['model'] == 'RandomForestClassifier':
+           show_decision_tree(trained_model)
+
+    score = (score[0] / len(rand_states), score[1] / len(rand_states), score[2] / len(rand_states))
+    print(f"Final score of cross-val: F1={score[0]}, Recall = {score[1]}, Precision={score[2]}")
 
     with open('model.pkl', 'wb') as f:
        print("Saving model..")
@@ -483,11 +546,11 @@ if __name__ == '__main__':
     # config_path = 'config.json'  # config file is used to store some parameters of the dataset
     config = {
         'model': 'CatBoostClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier', 'CatBoostClassifier'
-        'test_split': 0.2,  # validation/training split proportion
+        'test_split': 0.25,  # validation/training split proportion
         'normalize': False,  # normalize input values or not
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/',
+        'dataset_src': 'data/2223',
         'encode_categorical': True,
         'make_synthetic': False  # whether to use synthetic data
     }

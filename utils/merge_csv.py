@@ -6,9 +6,19 @@ import hashlib
 
 from matplotlib.dates import DAYS_PER_MONTH
 
-ON_COLUMN = 'Full name'
+ON_COLUMN = 'Сотрудник'
 DATA_START_DATE = date(year=2022, month=1, day=1)
 DATA_LOAD_DATE = date(year=2025, month=1, day=1)
+
+def write(_df: pd.DataFrame, _res_path: str, _sheet_name: str):
+    print("Writing result to", _res_path)
+    if os.path.exists(_res_path):
+        writer = pd.ExcelWriter(_res_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
+    else:
+        writer = pd.ExcelWriter(_res_path, mode='w', engine='openpyxl')
+
+    _df.to_excel(writer, sheet_name=_sheet_name, index=False)
+    writer.close()
 
 def fill_zeros(_df: pd.DataFrame):
     for n, row in _df.iterrows():
@@ -18,7 +28,7 @@ def fill_zeros(_df: pd.DataFrame):
     return _df
 
 def check_duplicates(_df: pd.DataFrame):
-    feature_name = 'Full name'
+    feature_name = ON_COLUMN
     feature_values = set()
     for n, row in _df.iterrows():
         val = row[feature_name]
@@ -75,9 +85,7 @@ def job_category(_path: str, _cat_path: str, _feature_name: str):
 
     df['Job title'] = df['Job title'].apply(get_cat)
 
-    writer = pd.ExcelWriter(_path, engine='openpyxl',  if_sheet_exists='replace', mode='a')
-    df.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
-    writer.close()
+    write(df, _path, _feature_name)
     return df
 
 def create_unique_code(_path: str, _sheet_names: list):
@@ -159,7 +167,33 @@ def count_dismissed(_path: str):
     print(f'Works: {n_work}, left: {n_left}')
 
 
-def merge_timeseries(_path: str, _res_path: str, _compamy_name: str, _time_series_name: str, _post_remove_duplicates: bool = False):
+def handle_duplicates(_df: pd.DataFrame, _duplicates_info: dict):
+    for code in set(_df[ON_COLUMN].values.tolist()):
+        if code in _duplicates_info.keys():
+            sample = _df.loc[_df[ON_COLUMN]==code]
+            _df = _df.loc[_df[ON_COLUMN]!=code]
+            duplic_type = _duplicates_info[code][0]
+            if duplic_type == 'multi_job':
+                for n, row in sample.iterrows():
+                    row[ON_COLUMN] = row[ON_COLUMN] + row['Job title']
+                    sample.loc[n] = row
+            elif duplic_type == 'duplicate':
+                sample = sample.loc[:1]
+            elif duplic_type == 'raider':
+                row = sample.iloc[:1]
+                new_sample = sample.copy()[0:0]
+                row[-12:] = sample.iloc[:, -12:].sum()
+                for period in _duplicates_info[code][1]:
+                    new_row = row
+                    new_row[code] = row[code] + period[0]
+                    new_sample = pd.concat([new_sample, new_row], axis=0)
+                sample = new_sample
+            _df = pd.concat([_df, sample], axis=0)
+
+
+
+
+def merge_timeseries(_path: str, _res_path: str, _compamy_name: str, _time_series_name: str, _post_remove_duplicates: bool = False, _duplicates_info: dict | None = None):
     col_to_pop = []  #   ['№ п/п', 'Итого']  # ['№', 'Legal entity', "Department", 'Hire date', 'Date of dismissal', 'Job title', 'Code']
     df_res = pd.DataFrame()
 
@@ -171,12 +205,13 @@ def merge_timeseries(_path: str, _res_path: str, _compamy_name: str, _time_serie
                 if n == 0:
                     print("Initial file:", filename)
                     df_res = pd.read_excel(os.path.join(dirpath, filename))
+                    df_res = handle_duplicates(df_res, _duplicates_info)
                     df_res = df_res.drop(columns=col_to_pop)
-
                     n += 1
                     continue
                 path2 = os.path.join(dirpath, filename)
                 sheet2 = pd.read_excel(path2)
+                sheet2 = handle_duplicates(sheet2, _duplicates_info)
                 sheet2 = sheet2.drop(columns=col_to_pop)
 
                 df_res = df_res.merge(sheet2, on=ON_COLUMN, how='outer')
@@ -191,14 +226,7 @@ def merge_timeseries(_path: str, _res_path: str, _compamy_name: str, _time_serie
                 df_res = df_res.drop(df_res[df_res[ON_COLUMN] == code].index)
                 codes = df_res[ON_COLUMN].values
 
-    print("Writing result to", _res_path)
-    if os.path.exists(_res_path):
-        writer = pd.ExcelWriter(_res_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
-    else:
-        writer = pd.ExcelWriter(_res_path, mode='w', engine='openpyxl')
-
-    df_res.to_excel(writer, sheet_name=_time_series_name, index=False)
-    writer.close()
+    write(df_res, _res_path, _time_series_name)
 
 
 def merge_two_tables(_df_pres: pd.DataFrame, _df_past: pd.DataFrame, _on_column: str):
@@ -209,7 +237,7 @@ def merge_two_tables(_df_pres: pd.DataFrame, _df_past: pd.DataFrame, _on_column:
         if code not in pres_codes:
             _df_pres.loc[_df_pres.shape[0]+1] = row
 
-        elif code in pres_codes:
+        elif False and code in pres_codes:
             print("Already exists:", code)
             sample = _df_pres.loc[_df_pres[_on_column] == code]
             hire_date_pres = sample['Hire date']
@@ -332,9 +360,7 @@ def merge_firms(_path: str, _res_path: str):
 
     result_filename = 'result_' + _path[-1] + '.xlsx'
     result_path = os.path.join(_res_path, result_filename)
-    writer = pd.ExcelWriter(result_path, mode='w', engine='openpyxl')
-    df_res.to_excel(writer, sheet_name='Лист_1', index=False)
-    writer.close()
+    write(df_res, result_path, 'Лист_1')
 
 
 def rename_columns(_filepath: str):
@@ -360,9 +386,7 @@ def add_zero_lines(_main_path: str, _feature_name: str):
             new_row = [code] + list(0 for i in range(36))
             ts_df.loc[ts_df.index.max() + 1] = new_row
 
-    writer = pd.ExcelWriter(_main_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
-    ts_df.to_excel(writer, sheet_name=_feature_name, index=False)
-    writer.close()
+    write(ts_df, _main_path, _feature_name)
 
 
 def add_zero_vacations(_main_path: str, _feature_name: str):
@@ -388,9 +412,7 @@ def add_zero_vacations(_main_path: str, _feature_name: str):
             new_row = [code] + list(0 for i in range(hire_month)) + list(add_per_month*i for i in range(36-hire_month))
             ts_df.loc[ts_df.index.max() + 1] = new_row
 
-    writer = pd.ExcelWriter(_main_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
-    ts_df.to_excel(writer, sheet_name=_feature_name+'_zeros', index=False)
-    writer.close()
+    write(ts_df, _main_path, _feature_name+'_zeros')
 
 
 def str_to_datetime(_date_str: str):
@@ -400,6 +422,7 @@ def str_to_datetime(_date_str: str):
 DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 def events_to_timeseries(_path_events: str, _trg_path: str, _feature_name: str, _check_feature: bool = False):
+    # for absenteeism
     df_res = pd.DataFrame(columns=[ON_COLUMN, 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sept', 'oct', 'nov', 'dec'])
 
     print('\nMaking time series\n', _path_events)
@@ -438,9 +461,7 @@ def events_to_timeseries(_path_events: str, _trg_path: str, _feature_name: str, 
         df_res.loc[df_res.shape[0]+1] = new_row
         num += 1
 
-    writer = pd.ExcelWriter(_trg_path, mode='w', engine='openpyxl')
-    df_res.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
-    writer.close()
+    write(df_res, _trg_path, _feature_name)
 
 
 def vacation_to_timeseries(_path_events: str, _path2: str, _trg_path: str, _feature_name: str, _check_feature: bool = False):
@@ -501,32 +522,29 @@ def vacation_to_timeseries(_path_events: str, _path2: str, _trg_path: str, _feat
         df_res.loc[df_res.shape[0]+1] = new_row
         num += 1
 
-    writer = pd.ExcelWriter(_trg_path, mode='w', engine='openpyxl')
-    df_res.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
-    writer.close()
+    write(df_res, _trg_path, _feature_name)
 
-
-def worked_less_than(_df: pd.DataFrame, _less_than_months: int=2):
-    lst = []
-    for n, row in _df.iterrows():
-        if n == 0:
-            continue
-        recr_date = str_to_datetime(row['Hire date'])
-        recr_date = max(recr_date, DATA_START_DATE)
-        if not pd.isnull(row['Date of dismissal']):
-            term_date = str_to_datetime(row['Date of dismissal'])
-        else:
-            term_date = DATA_LOAD_DATE
-        empl_period = (term_date-recr_date).days / 30
-        if empl_period < _less_than_months:
-            lst.append((row['Full name'], recr_date, term_date))
-            print(_df.loc[_df['Full name'] == row['Full name']])
-            # print(_df.loc[_df])
-
-    #for l in sorted(lst):
-    #    print(l[0], l[1], l[2])
 
 def run_short_employment(_main_dir: str, _company_names: list):
+    def worked_less_than(_df: pd.DataFrame, _less_than_months: int = 2):
+        lst = []
+        for n, row in _df.iterrows():
+            if n == 0:
+                continue
+            recr_date = str_to_datetime(row['Hire date'])
+            recr_date = max(recr_date, DATA_START_DATE)
+            if not pd.isnull(row['Date of dismissal']):
+                term_date = str_to_datetime(row['Date of dismissal'])
+            else:
+                term_date = DATA_LOAD_DATE
+            empl_period = (term_date - recr_date).days / 30
+            if empl_period < _less_than_months:
+                lst.append((row['Full name'], recr_date, term_date))
+                print(_df.loc[_df['Full name'] == row['Full name']])
+                # print(_df.loc[_df])
+
+        # for l in sorted(lst):
+        #    print(l[0], l[1], l[2])
     for company_name in _company_names:
         company_dir = os.path.join(_main_dir, company_name)
         for dirpath, _, filenames in os.walk(company_dir):
@@ -552,32 +570,64 @@ def merge_companies(_main_dir: str, _time_series_names: list):
             ts_sub = os.path.join(ts_dir, sub_folder)
             # merge_firms(ts_sub, ts_dir)
 
-def concat_timeseries(_company_dir: str, _company_names: list, _feature_name: str, _final_path: str):
+def merge_people(_df: pd.DataFrame):
+    def merge_periods(periods):
+        new_dates = []
+        current_start, current_end = periods[0]
+
+        for start, end in periods[1:]:
+            if (str_to_datetime(start) - str_to_datetime(current_end)).days < 90:
+                current_end = end
+            else:
+                new_dates.append((current_start, current_end))
+                current_start, current_end = start, end
+
+        new_dates.append((current_start, current_end))
+        return new_dates
+
+    result = {}
+    for code in set(_df[ON_COLUMN].values.tolist()):
+        condition = _df[ON_COLUMN]==code
+        sample = _df.loc[condition]
+        if len(sample) == 1:  # person has no duplicates
+            continue
+        hire_dates = sample['Hire date'].values
+        dism_dates = sample['Date of dismissal'].values
+
+        if len(set(hire_dates.tolist())) == 1 and len(set(dism_dates.tolist())) == 1:
+            print("Remove one duplicate")
+            # _df = _df[~condition]  # remove all the entries of this employee from _df
+            result[code] = ['duplicate', 0, 0]
+
+        elif len(set(sample['Job title'].values.tolist())) > 1:
+                print("Make multiple person, add job title to name")
+                result[code] = ['multi_job', 0, 0]
+        else:  # so we have same job titles but different hire/dism dates
+            periods = list(zip(hire_dates, dism_dates))
+            print(f"Dates of hire and dismissal: {periods}")
+            periods = sorted(periods)
+            print(periods)
+
+            result[code] = ['raider', merge_periods(periods)]
+            print("New working periods:", result[code][1])
+    return result
+
+
+
+def concat_timeseries(_company_dir: str, _company_name: str, _feature_name: str, _final_path: str):
+    # this doesn't provide correct merge of time series, but serves to reveal non-residents with multiple hire dates
     feature_dir = os.path.join(_company_dir, _feature_name)
-    res_df = merge_tables(feature_dir, company_name, _feature_name, False)
+    res_df = merge_tables(feature_dir, _company_name, _feature_name, False)
 
-    if os.path.exists(_final_path):
-        writer = pd.ExcelWriter(_final_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
-    else:
-        writer = pd.ExcelWriter(_final_path, mode='w', engine='openpyxl')
-
-    print("writing result to ", _final_path)
-    res_df.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
-    writer.close()
+    write(res_df, _final_path, _feature_name)
+    return res_df
 
 def merge_main_data(_main_dir: str, _company_names: list, _feature_name: str, _final_path: str):
     for company_name in _company_names:
         company_dir = os.path.join(_main_dir, company_name)
         res_df = merge_tables(company_dir, company_name, _feature_name, True)
 
-        if os.path.exists(_final_path):
-            writer = pd.ExcelWriter(_final_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
-        else:
-            writer = pd.ExcelWriter(_final_path, mode='w', engine='openpyxl')
-
-        print("writing result to ", _final_path)
-        res_df.to_excel(writer, sheet_name=_feature_name, index=False, engine='openpyxl')
-        writer.close()
+        write(res_df, _final_path, _feature_name)
 
 def check_some_statistics():
     # run_short_employment(main_dir, company_names)
@@ -586,16 +636,23 @@ def check_some_statistics():
     # count_dismissed(file3)
     pass
 
+def get_duplicates_info(_conpany_dir: str, _company_name: str, _time_series_name: str, _res_path: str):
+    res_df = concat_timeseries(_conpany_dir, _company_name, _time_series_name, _res_path)
+    duplicates_info = merge_people(res_df)
+    return duplicates_info
+
+
 def handle_timeseries(_time_series_names: list, _company_names: list, _data_dir: str, _main_dir: str, _final_path: str):
     for time_series_name in _time_series_names:
         # merge_tables(company_dir, company_name)
         for company_name in _company_names:
             company_dir = os.path.join(_main_dir, _data_dir, company_name)
-            res_path = os.path.join(company_dir, time_series_name) + '_1.xlsx'
+            sub_fold = os.path.join(company_dir, time_series_name)
+            res_path = sub_fold + '_1.xlsx'
             # filename = time_series_name + '.xlsx'
             # time_series_dfs.append(pd.read_excel(os.path.join(company_dir, filename)))
-            concat_timeseries(company_dir, _company_names, time_series_name, res_path)
-            # merge_timeseries(sub_fold, _final_path, company_name, time_series_name)
+            duplicates_info = get_duplicates_info(company_dir, company_name, time_series_name, res_path)
+            merge_timeseries(sub_fold, _final_path, company_name, time_series_name, duplicates_info)
 
     # then merge timeseries of different companies:
     for dirpath, dirnames, filenames in os.walk(_main_dir):
@@ -625,10 +682,10 @@ def handle_categorical_variables(_main_dir: str, _final_path: str):
     # working_region(_final_path)
 
 if __name__ == '__main__':
-    time_series_names = ['Отпуска', 'Выплаты', 'Отсутствия', 'Сверхурочка']
+    time_series_names = ['Выплаты']  # ['Отпуска', 'Выплаты', 'Отсутствия', 'Сверхурочка']
     main_dir = '/home/elena/ATTRITION/sequoia/'
-    company_names = ['Вига-65', 'Берендсен', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
-    data_dir = 'Выгрузка'
+    company_names = ['SWG']  # ['Вига-65', 'Берендсен', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
+    data_dir = 'SWG'
 
     final_filename = data_dir + '_final.xlsx'
     final_path = os.path.join(main_dir, data_dir, final_filename)
@@ -645,9 +702,9 @@ if __name__ == '__main__':
     # vacations_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2024.xlsx'), os.path.join(data_dir, 'Остатки отпусков 01.01.2024.xlsx'), events_to_timeseries_path, 'Отпуск')
     # events_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2022.xlsx'), events_to_timeseries_path, 'Отсутствия')
 
-    handle_timeseries(time_series_names, company_names, data_dir, main_dir, final_path)
+    # handle_timeseries(time_series_names, company_names, data_dir, main_dir, final_path)
 
-    # create_unique_code(final_path, ['Выплаты'])  # time_series_names + ['Основные данные'])
+    create_unique_code(final_path, ['Выплаты'])  # time_series_names + ['Основные данные'])
 
     # Finally, apply job categories:
     handle_categorical_variables(main_dir, final_path)

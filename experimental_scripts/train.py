@@ -21,8 +21,9 @@ from sklearn.metrics import r2_score, precision_score, recall_score, f1_score, c
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.model_selection import GridSearchCV
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier, Pool
 
+from imblearn.over_sampling import SMOTENC
 
 from pathlib import Path
 # from examples.local import setting_dask_env
@@ -41,7 +42,6 @@ import matplotlib.pyplot as plt
 
 from utils.dataset import create_features_for_datasets, add_quality_features
 
-CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards', 'citizenship_gender', 'income_group', 'position_industry']
 # industry_avg_income = df.groupby('field')['income_shortterm'].mean().to_dict()
 # df['industry_avg_income'] = df['field'].map(industry_avg_income)
 # df['income_vs_industry'] = df['income_shortterm'] - df['industry_avg_income']
@@ -80,7 +80,6 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 
     data = pd.DataFrame(data=values, index=keys, columns=["score"]).sort_values(by="score", ascending=False)
     l = data.nlargest(20, columns="score").plot(kind='barh', figsize=(20, 10))  # plot top 20 features
-    print(l)
     print(f"XGBoost test result: Recall = {test_result['Recall']}\nPrecision = {test_result['Precision']}\nF1 = {test_result['F1']}")
 
     feature_importance = best_model.feature_importances_
@@ -113,7 +112,6 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
     #                         plot=True)
     # print(f"Best CatBoost params: {res}")
 
-    print(_cat_feats_encoded)
     model.fit(
         _x_train,
         _y_train,
@@ -123,7 +121,22 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         # plot=True,
         # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
     )
-    print("Feature importance:", model.get_feature_importance(prettified=True))
+    train_pool = Pool(data=_x_train, label=_y_train)
+    shap_values = model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
+    feature_names = _x_train.columns
+    #base_value = shap_values[0, -1]  # Последний столбец для всех samples одинаков
+    #print(f"Base value (средняя вероятность класса 1): {base_value:.4f}")
+    importance = ((shap_values[:, :-1])).mean(axis=0)
+    for f, i in zip(feature_names, importance):
+        print(f"{f}: {i}")
+    sorted_idx = np.argsort(np.abs(importance))  # Indices from highest to lowest magnitude
+    sorted_features = [feature_names[i] for i in sorted_idx]
+    sorted_shap = [importance[i] for i in sorted_idx]  # Signed values
+    colors = ['red' if val > 0 else 'blue' for val in sorted_shap]
+    sorted_shap = [abs(s) for s in sorted_shap]  # Signed values
+    plt.barh(sorted_features, sorted_shap, color=colors)
+    plt.title('CatBoost Feature Importance')
+    plt.show()
 
     return model
 
@@ -279,13 +292,13 @@ def make_synthetic(_dataset: pd.DataFrame, _size: int = 1000):
 
     # Generate data samples by the end of the synth process
     synth_sample = cardio_synth.sample(n_samples=_size,
-                                       condition_on={
-                                        "status": {
-                                            "categories": [{
-                                                "category": 0,
-                                                "percentage": 0.6
-                                            }]
-                                        }}
+                                       # condition_on={
+                                       #  "status": {
+                                       #      "categories": [{
+                                       #          "category": 0,
+                                       #          "percentage": 1.0
+                                       #      }]
+                                       #  }}
                                        )
 
     # TODO target variable validation
@@ -301,10 +314,10 @@ def make_synthetic(_dataset: pd.DataFrame, _size: int = 1000):
     )
     return synth_sample.to_pandas()  # {t: df.to_pandas() for t, df in res.items()}
 
-def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
-    encoded_features = _encoder.transform(_dataset[CATEGORICAL_FEATURES]).toarray().astype(int)
-    encoded_df = pd.DataFrame(encoded_features, columns=_encoder.get_feature_names_out(CATEGORICAL_FEATURES))
-    numerical_part = _dataset.drop(columns=CATEGORICAL_FEATURES)
+def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder, _cat_features: list):
+    encoded_features = _encoder.transform(_dataset[_cat_features]).toarray().astype(int)
+    encoded_df = pd.DataFrame(encoded_features, columns=_encoder.get_feature_names_out(_cat_features))
+    numerical_part = _dataset.drop(columns=_cat_features)
     return pd.concat([encoded_df, numerical_part], axis=1), encoded_df
 
 def collect_datasets(_data_path: str):
@@ -323,21 +336,19 @@ def collect_datasets(_data_path: str):
         datasets.append(dataset)
     return datasets
 
-def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorical: bool, _test_split: float, _split_rand_state: int):
-    cat_feature_names = CATEGORICAL_FEATURES
-
+def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorical: bool, _test_split: float, _cat_feat: list, _split_rand_state: int):
     if _encode_categorical:
         concat_dataset = pd.concat(_datasets)
         encoder = OneHotEncoder()
-        encoder.fit(concat_dataset[CATEGORICAL_FEATURES])
+        encoder.fit(concat_dataset[_cat_feat])
 
     # if _make_synthetic:
     #     united = pd.concat(_datasets, axis=0)
-    #     sample_df = make_synthetic(united, _split_rand_state, 1000)
+    #     sample_df = make_synthetic(united,1000)
     #
     #     # Check for similar rows and print if match:
-    #     for n, syn_row in sample_df.iterrows():
-    #         for n1, real_row in united.iterrows():
+    #     for n, syn_row in united.iterrows():
+    #         for n1, real_row in sample_df.iterrows():
     #             if (syn_row.values.astype(int) == real_row.values.astype(int)).all():
     #                 print("Match!", real_row.values.astype(int), syn_row.values.astype(int))
     #
@@ -365,20 +376,22 @@ def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorica
         if _make_synthetic:
             val = dataset.sample(frac=_test_split, random_state=_split_rand_state)
             trn = dataset.drop(val.index)
-            sample_trn = make_synthetic(trn, len(trn))
+            sample_trn = make_synthetic(trn, 1000)
 
-            #
-            #     # Check for similar rows and print if match:
-            #     for n, syn_row in sample_df.iterrows():
-            #         for n1, real_row in united.iterrows():
-            #             if (syn_row.values.astype(int) == real_row.values.astype(int)).all():
-            #                 print("Match!", real_row.values.astype(int), syn_row.values.astype(int))
+
+            # Check for similar rows and print if match:
+            for n, syn_row in sample_trn.iterrows():
+                for n1, real_row in trn.iterrows():
+                    cond1 = syn_row.values.astype(float) * 0.99 < real_row.values.astype(float)
+                    cond2 = syn_row.values.astype(float) * 1.01 > real_row.values.astype(float)
+                    if (cond1 & cond2).all():
+                        print("Match!", real_row.values.astype(int), syn_row.values.astype(int))
 
         if _encode_categorical:
             # Convert the encoded features to a DataFrame
-            dataset, encoded_part = encode_categorical(dataset, encoder)
+            dataset, encoded_part = encode_categorical(dataset, encoder, _cat_feat)
             if _make_synthetic:
-                sample_trn, _ = encode_categorical(sample_trn, encoder)
+                sample_trn, _ = encode_categorical(sample_trn, encoder, _cat_feat)
             cat_feature_names = encoded_part.columns.values
 
 
@@ -522,7 +535,7 @@ def calc_weights(_y_train: pd.DataFrame, _y_val: pd.DataFrame):
     #return np.array([w_0 if i == 1 else w_1 for i in _y_train.values])
     return np.array([1 if i == 1 else 1 for i in _y_train.values])
 
-def get_united_dataset(_d_train: list, _d_val: list, _d_test: list, _make_synthetic: bool):
+def get_united_dataset(_d_train: list, _d_val: list, _d_test: list):
     trn = pd.concat(_d_train, axis=0)
     vl = pd.concat(_d_val, axis=0)
 
@@ -535,23 +548,38 @@ def get_united_dataset(_d_train: list, _d_val: list, _d_test: list, _make_synthe
     y_val = vl[-1:].transpose()
     return x_train, y_train, x_val, y_val
 
+def minority_class_resample(_datasets: list, _cat_feat: list):
+    smote = SMOTENC(categorical_features=[2,3,4,5,7], sampling_strategy='auto', k_neighbors=5, random_state=42)
+    new_datasets = []
+    for d in _datasets:
+        X = d.drop('status', axis=1)
+        y = d['status']
+        X_resampled, y_resampled = smote.fit_resample(X, y)
+        df_resampled = pd.DataFrame(X_resampled, columns=X.columns)
+        df_resampled['status'] = y_resampled
+        new_datasets.append(df_resampled)
+    return new_datasets
+
 
 def main(_config: dict):
     data_path = config['dataset_src']
     datasets = collect_datasets(data_path)
-    rand_states = [42]  # , 6, 1370, 5087, 777]
+    rand_states = [777, 42, 6, 1370, 5087]
     score = [0, 0, 0]
+
+    if _config['smote']:
+        datasets = minority_class_resample(datasets, config['cat_features'])
+
     if _config['calculated_features']:
-        datasets = create_features_for_datasets(datasets)
+        datasets, new_cat_feat = create_features_for_datasets(datasets)
+        _config['cat_features'] += new_cat_feat
 
     for split_rand_state in rand_states:
-        d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(datasets, config['make_synthetic'], config['encode_categorical'], config['test_split'], split_rand_state)
-
-        x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test, config['make_synthetic'])
+        d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(datasets, config['make_synthetic'], config['encode_categorical'], config['test_split'], config['cat_features'], split_rand_state)
+        x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test)
         # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
 
         print(f"X train: {x_train.shape[0]}, x_val: {x_val.shape[0]}, y_train: {y_train.shape[0]}, y_val: {y_val.shape[0]}")
-        print(y_train)
         sample_weight = calc_weights(y_train, y_val)
 
         # print(sample_weight)
@@ -583,8 +611,11 @@ if __name__ == '__main__':
         'dataset_src': 'data/2223',
         'encode_categorical': True,
         'calculated_features': True,
-        'make_synthetic': True  # whether to use synthetic data
+        'make_synthetic': False,  # whether to use synthetic data
+        'smote': False,
+        'cat_features': ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
     }
+
     main(config)
 
 # 97d0ae93-9dfc-4c2a-9183-a0420a4d0771
@@ -617,3 +648,10 @@ if __name__ == '__main__':
 #Final score of cross-val: F1=0.8232662192393736, Recall = 0.7965367965367965, Precision=0.8518518518518519
 #Final score of cross-val: F1=0.8436018957345972, Recall = 0.8090909090909091, Precision=0.8811881188118812
 # F1 = 0.8435
+
+# Only generate ~200 samples of 0 label
+# Final score of cross-val: F1=0.8435374149659864, Recall = 0.8266666666666667, Precision=0.8611111111111112
+# Final score of cross-val: F1=0.8325358851674641, Recall = 0.7981651376146789, Precision=0.87
+# Final score of cross-val: F1=0.8274231678486997, Recall = 0.8064516129032258, Precision=0.8495145631067961
+# Final score of cross-val: F1=0.8181818181818182, Recall = 0.7792207792207793, Precision=0.861244019138756
+# F1 = 0.8367

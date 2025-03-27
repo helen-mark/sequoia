@@ -211,7 +211,7 @@ def add_quality_features(df: pd.DataFrame):
     df['citizenship_gender'] = df['citizenship'].astype(str) + '_' + df['gender'].astype(str)
     df['absences_per_experience'] = df['absenteeism_shortterm'] / (df['seniority'] + 1)
     df['unused_vacation_per_experience'] = df['vacation_days_shortterm'] / (df['seniority'] + 1)
-    df['log_experience'] = np.log1p(df['seniority'])
+    df['log_experience'] = np.log1p(df['seniority']+0.5)
     df['absences_per_year'] = df['absenteeism_shortterm'] / (df['seniority'] / 365 + 0.001)
     df['income_per_experience'] = df['income_shortterm'] / (df['seniority'] + 1)
     df['income_group'] = pd.qcut(df['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
@@ -223,15 +223,18 @@ def add_quality_features(df: pd.DataFrame):
     df['income_vs_industry'] = df['income_shortterm'] - df['industry_avg_income']
     position_median_income = df.groupby('department')['income_shortterm'].median().to_dict()
     df['position_median_income'] = df['department'].map(position_median_income)
-    return df
+
+    calculated_cat_feat = ['citizenship_gender', 'income_group', 'position_industry']
+    return df, calculated_cat_feat
 
 def create_features_for_datasets(_datasets: list):
     improved_datasets = []
     for d in _datasets:
-        d = add_quality_features(d)
+        d, new_cat_feat = add_quality_features(d)
         cols = d.columns.tolist()
+        print(cols)
         cols.remove('status')
         cols = cols + ['status']  # put 'status' to the end
         d = d[cols]
         improved_datasets.append(d)
-    return improved_datasets
+    return improved_datasets, new_cat_feat

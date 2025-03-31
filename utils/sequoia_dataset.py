@@ -102,6 +102,10 @@ class SequoiaDataset:
         self.min_window = _data_config['time_snapshots']['min_window']
         self.max_window = _data_config['time_snapshots']['max_window']
         self.random_snapshot = _data_config['time_snapshots']['random_snapshot']  # make random snapshot offset for each person
+
+        self.forecast_horison = _data_config['options']['forecast_horison']
+        self.remove_censored = _data_config['options']['remove_censored']
+
         self.sample_presets = {}
 
         self.data_load_date = _data_config['data']['data_load_date']
@@ -303,19 +307,21 @@ class SequoiaDataset:
 
     def calc_individual_snapshot_start(self, _snapshot: SnapShot, _start_date: date, _end_date: date):
         initial_offset = _snapshot.initial_offset
+        num = _snapshot.num
         empl_period = (_end_date - _start_date).days / 30
         if empl_period - _snapshot.total_offset() < _snapshot.min_duration:  # person worked for very short period
             initial_offset = 0
             snapshot_start = _end_date
             return snapshot_start
 
-        if self.random_snapshot and _end_date == self.str_to_datetime(self.data_load_date):  # make random offset
-            individual_max_initial_offset = np.floor(empl_period - _snapshot.min_duration)
+        if self.random_snapshot:  # and _end_date == self.str_to_datetime(self.data_load_date):  # make random offset
+            individual_max_initial_offset = int(np.floor(empl_period - _snapshot.min_duration))
             if individual_max_initial_offset > 0:
                 initial_offset = random.randint(initial_offset, individual_max_initial_offset)
+                num = 0
 
 
-        offset_months = _snapshot.num * _snapshot.step + initial_offset
+        offset_months = num * _snapshot.step + initial_offset
         offset_years = int(np.floor(offset_months / 12))
         offset_months = offset_months % 12
         year = _end_date.year - offset_years
@@ -610,14 +616,19 @@ class SequoiaDataset:
             recr_date = row['Hire date']
             term_date = row['Date of dismissal']
             code = row["Code"]
+            status = 1
+
             if term_date is None or str(term_date) == 'nan':
                 row['Date of dismissal'] = self.data_load_date
                 term_date = row['Date of dismissal']
                 _input_df.loc[n] = row
+                status = 0
 
             recr_date = self.str_to_datetime(recr_date)
             term_date = self.str_to_datetime(term_date)
             empl_period = (term_date-recr_date).days / 30
+            start_date = max(recr_date, self.data_begin_date)
+            end_date = min(term_date, self.str_to_datetime(self.data_load_date))
             # remove sample if it has no data for current time snapshot:
 
             if self.remove_short_service:
@@ -625,12 +636,18 @@ class SequoiaDataset:
                     # print(code)  # , recr_date, term_date, f"({int(empl_period)} months)")
                     _input_df = _input_df.drop(axis='index', labels=n)
                     deleted_count += 1
-                elif (term_date - self.data_begin_date).days / 30 - _snapshot.total_offset() <= _snapshot.min_duration:
+                elif (term_date - self.data_begin_date).days / 30 - _snapshot.num * _snapshot.step <= _snapshot.min_duration:
                     _input_df = _input_df.drop(axis='index', labels=n)
                     deleted_count += 1
 
-            # cut out employees with employment behind chosen data pediod:
+            # cut out employees with employment beyond chosen data period:
             if recr_date >= self.str_to_datetime(self.data_load_date) or term_date < self.data_begin_date:
+                _input_df = _input_df.drop(axis='index', labels=n)
+                deleted_count += 1
+            elif _snapshot.num > 0 and (end_date - start_date).days / 30 <= _snapshot.total_offset():  # employment doesn't belong to this snapshot
+                _input_df = _input_df.drop(axis='index', labels=n)
+                deleted_count += 1
+            elif self.remove_censored and status == 0 and _snapshot.total_offset() < self.forecast_horison:  # removing censored data
                 _input_df = _input_df.drop(axis='index', labels=n)
                 deleted_count += 1
 
@@ -645,16 +662,16 @@ class SequoiaDataset:
         else:
             snapshot_dataset = self.fill_common_features(_common_features, _input_df, snapshot_dataset)
 
-        if _snapshot.num > 0:
-            snapshot_dataset['status'] = [0 for i in range(len(snapshot_dataset['status']))]
-            full_dataset['status'] = [0 for i in range(len(full_dataset['status']))]
+            # if _snapshot.num > 0:
+            #     snapshot_dataset['status'] = [0 for i in range(len(snapshot_dataset['status']))]
+            #     full_dataset['status'] = [0 for i in range(len(full_dataset['status']))]
 
-        if 'status' not in snapshot_dataset.columns:  # client didn't provide status info
-            self.fill_status(snapshot_dataset)
-        if 'age' not in snapshot_dataset.columns:  # client didn't provide age info
-            self.age_from_birth_date(snapshot_dataset)
-        if 'seniority' not in snapshot_dataset.columns:  # client didn't provide company seniority info
-            self.seniority_from_term_date(snapshot_dataset)
+            if 'status' not in snapshot_dataset.columns:  # client didn't provide status info
+                self.fill_status(snapshot_dataset)
+            if 'age' not in snapshot_dataset.columns:  # client didn't provide age info
+                self.age_from_birth_date(snapshot_dataset)
+            if 'seniority' not in snapshot_dataset.columns:  # client didn't provide company seniority info
+                self.seniority_from_term_date(snapshot_dataset)
 
         return snapshot_dataset, full_dataset
 
@@ -716,6 +733,9 @@ class SequoiaDataset:
 
             snapshot_start = self.calc_individual_snapshot_start(_snapshot, start_date,
                                                                  end_date)
+            if (person_termination_date - snapshot_start).days / 30 > self.forecast_horison:
+                row['status'] = 0
+                _dataset.loc[n] = row
             self.sample_presets[code] = SamplePreset(person_recruitment_date, person_termination_date, start_date, end_date, snapshot_start)
 
 

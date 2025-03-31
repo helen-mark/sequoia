@@ -2,36 +2,40 @@ data_location:
   data_path: 'data_raw/'
   trg_path: 'data/'
 
-#  file_name: 'all_data_final.xlsx'  # check file extension
-#  output_name: 'sequoia_dataset.csv'
-#data:
-#  region: 'Москва'
-#  industry: 'Light industry'  #  Metals, Light industry
-
-  file_name: 'SWG_final.xlsx'  # check file extension
-  output_name: 'swg_dataset.csv'
+  file_name: 'all_data_final.xlsx'  # check file extension
+  output_name: 'sequoia_dataset_2223_snap.csv'
 data:
   region: 'Москва'
   industry: 'Light industry'  #  Metals, Light industry
 
+#  file_name: 'SWG_final.xlsx'  # check file extension
+#  output_name: 'swg_dataset_24_snap.csv'
+#data:
+#  region: 'Москва'
+#  industry: 'Light industry'  #  Metals, Light industry
+
 #  file_name: 'polimer.xlsx'  # check file extension
-#  output_name: 'polimer_dataset.csv'
+#  output_name: 'polimer_dataset_24_snap.csv'
 #data:
 #  region: 'Оренбург'
 #  industry: 'Metals'  #  Metals, Light industry
+
   income_calibration: 'Inflation'  # Living wage, Inflation
   remove_short_service: False
   date_format: '%Y.%m.%d'
-  data_load_date: '01.01.2025'
-  data_begin_date: '01.01.2024'
+  data_load_date: '01.02.2024'
+  data_begin_date: '01.01.2022'
 time_snapshots:
-  snapshot_step: 6  # months
+  snapshot_step: 3  # months
   snapshot_min_duration: 1
   snapshot_initial_offset: 1
-  max_snapshots_number: 1
+  max_snapshots_number: 2
   min_window: 2
   max_window: 6
-  random_snapshot: False
+  random_snapshot: True
+options:
+  forecast_horison: 6
+  remove_censored: False
 required_sheets:
   basic:
     name: 'Основные данные'

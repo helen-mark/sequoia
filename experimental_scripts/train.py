@@ -40,7 +40,7 @@ from dask.dataframe.io import from_pandas, from_array
 import seaborn as sn
 import matplotlib.pyplot as plt
 
-from utils.dataset import create_features_for_datasets, add_quality_features
+from utils.dataset import create_features_for_datasets, collect_datasets, add_quality_features
 
 # industry_avg_income = df.groupby('field')['income_shortterm'].mean().to_dict()
 # df['industry_avg_income'] = df['field'].map(industry_avg_income)
@@ -95,6 +95,7 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         learning_rate=0.1,
         od_type='IncToDec',
         l2_leaf_reg=5,
+        bootstrap_type='Bayesian',
         od_wait=5,
         depth=8,  # normally set it from 6 to 10
         eval_metric='Accuracy',
@@ -117,7 +118,7 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         _y_train,
         eval_set=(_x_test, _y_test),
         verbose=False,
-        sample_weight=_sample_weight,
+        # sample_weight=_sample_weight,
         # plot=True,
         # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
     )
@@ -320,21 +321,23 @@ def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder, _cat_fea
     numerical_part = _dataset.drop(columns=_cat_features)
     return pd.concat([encoded_df, numerical_part], axis=1), encoded_df
 
-def collect_datasets(_data_path: str):
-    datasets = []
-    for filename in os.listdir(_data_path):
-        if '.csv' not in filename:
-            continue
-        dataset_path = os.path.join(_data_path, filename)
-        print(filename)
-        dataset = pd.read_csv(dataset_path)
-        print("cols before", dataset.columns)
-        strings_to_drop = ['long',"birth","code",'external','overtime','termination','recruit']
-        dataset = dataset.drop(
-            columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
-        print("cols after", dataset.columns)
-        datasets.append(dataset)
-    return datasets
+def get_split(_dataset: pd.DataFrame, _test_split: float, _split_state: int):
+    # val = _dataset.sample(frac=_test_split, random_state=_split_state)
+    # test = val  # .sample(frac=0.3, random_state=_split_rand_state)
+    # # val = val.drop(test.index)
+    # trn = _dataset.drop(val.index)
+
+    n_splits = 5
+    fold_size = len(_dataset) // n_splits
+
+    start_index = _split_state * fold_size
+    end_index = (_split_state + 1) * fold_size if _split_state < n_splits - 1 else len(_dataset)
+
+    trn = pd.concat([_dataset.iloc[:start_index], _dataset.iloc[end_index:]])
+    val = _dataset.iloc[start_index:end_index]
+    test = val
+
+    return trn, val, test
 
 def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorical: bool, _test_split: float, _cat_feat: list, _split_rand_state: int):
     if _encode_categorical:
@@ -358,8 +361,7 @@ def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorica
     # if _make_synthetic:
     #   trns = []
     #   for d in _datasets:
-    #       val = d.sample(frac=_test_split, random_state=_split_rand_state)
-    #       trn = d.drop(val.index)
+    #       trn, val, test = get_split(d, _test_split, _split_rand_state)
     #       trns.append(trn)
     #   sample_trn = make_synthetic(pd.concat(trns, axis=0), 1000)
     #   if _encode_categorical:
@@ -374,8 +376,8 @@ def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorica
         # if _make_synthetic:
         #     sample_df = make_synthetic(dataset)
         if _make_synthetic:
-            val = dataset.sample(frac=_test_split, random_state=_split_rand_state)
-            trn = dataset.drop(val.index)
+            trn, val, test = get_split(dataset, _test_split, _split_rand_state)
+
             sample_trn = make_synthetic(trn, 1000)
 
 
@@ -394,11 +396,8 @@ def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorica
                 sample_trn, _ = encode_categorical(sample_trn, encoder, _cat_feat)
             cat_feature_names = encoded_part.columns.values
 
+        trn, val, test = get_split(dataset, _test_split, _split_rand_state)
 
-        val = dataset.sample(frac=_test_split, random_state=_split_rand_state)
-        test = val  # .sample(frac=0.3, random_state=_split_rand_state)
-        # val = val.drop(test.index)
-        trn = dataset.drop(val.index)
         if _make_synthetic:
             trn = pd.concat([trn, sample_trn], axis=0)
 
@@ -564,11 +563,8 @@ def minority_class_resample(_datasets: list, _cat_feat: list):
 def main(_config: dict):
     data_path = config['dataset_src']
     datasets = collect_datasets(data_path)
-    rand_states = [777, 42, 6, 1370, 5087]
+    rand_states = range(5)  # [777, 42, 6, 1370, 5087]
     score = [0, 0, 0]
-
-    if _config['smote']:
-        datasets = minority_class_resample(datasets, config['cat_features'])
 
     if _config['calculated_features']:
         datasets, new_cat_feat = create_features_for_datasets(datasets)
@@ -576,6 +572,12 @@ def main(_config: dict):
 
     for split_rand_state in rand_states:
         d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(datasets, config['make_synthetic'], config['encode_categorical'], config['test_split'], config['cat_features'], split_rand_state)
+
+        if _config['smote']:
+            d_train = minority_class_resample(d_train, config['cat_features'])
+            d_val = minority_class_resample(d_val, config['cat_features'])
+            d_test = minority_class_resample(d_test, config['cat_features'])
+
         x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test)
         # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
 
@@ -608,11 +610,11 @@ if __name__ == '__main__':
         'normalize': False,  # normalize input values or not
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/2223',
+        'dataset_src': 'data/2223_snap_randx2',
         'encode_categorical': True,
         'calculated_features': True,
         'make_synthetic': False,  # whether to use synthetic data
-        'smote': False,
+        'smote': True,  # perhaps not needed for catboost and in case if minority : majority > 0.5
         'cat_features': ['gender', 'citizenship', 'department', 'field', 'occupational_hazards']
     }
 
@@ -655,3 +657,61 @@ if __name__ == '__main__':
 # Final score of cross-val: F1=0.8274231678486997, Recall = 0.8064516129032258, Precision=0.8495145631067961
 # Final score of cross-val: F1=0.8181818181818182, Recall = 0.7792207792207793, Precision=0.861244019138756
 # F1 = 0.8367
+
+# NEXT go the experiments with snapshots.
+
+# With external factors (snapshot step 5m): F1 = 0.69
+# test on 2024:
+# F1 = 0.5888501742160279, Recall = 0.5044776119402985, Precision = 0.7071129707112971
+# F1 = 0.6875, Recall = 0.6994219653179191, Precision = 0.6759776536312849
+# F1 = 0.5052631578947369, Recall = 0.40955631399317405, Precision = 0.6593406593406593
+
+# With external factors (step 3 m): F1 = 0.74
+# test on 2024:
+# F1 = 0.6466575716234653, Recall = 0.7074626865671642, Precision = 0.5954773869346733
+# F1 = 0.6870588235294117, Recall = 0.8439306358381503, Precision = 0.5793650793650794
+# F1 = 0.5167652859960552, Recall = 0.447098976109215, Precision = 0.6121495327102804
+
+# Same but k_folds with row order preserved:
+# F1 = 0.7
+# F1 = 0.6147308781869688, Recall = 0.6477611940298508, Precision = 0.5849056603773585
+# F1 = 0.6700507614213198, Recall = 0.7630057803468208, Precision = 0.5972850678733032
+# F1 = 0.5025125628140703, Recall = 0.5119453924914675, Precision = 0.4934210526315789
+
+
+#Without external factors:
+# F1 = 0.58
+# test on 2024:
+# F1 = 0.6143344709897611, Recall = 0.5373134328358209, Precision = 0.7171314741035857
+# F1 = 0.6923076923076923, Recall = 0.6763005780346821, Precision = 0.7090909090909091
+# F1 = 0.494279176201373, Recall = 0.36860068259385664, Precision = 0.75
+
+# Same but k_folds with row order preserved:
+# F1 = 0.6
+# F1 = 0.6127527216174183, Recall = 0.5880597014925373, Precision = 0.6396103896103896
+# F1 = 0.7154929577464789, Recall = 0.7341040462427746, Precision = 0.6978021978021978
+# F1 = 0.5019762845849802, Recall = 0.4334470989761092, Precision = 0.596244131455399
+
+# Rand snap x2 with external factors, k_folds with row order preserved:: this way, finally external factors are NOT dominating by importance
+# Final score of cross-val: F1=0.6860099039347485, Recall = 0.6105416850580093, Precision=0.7833616988900067
+# test on 2024:
+# F1 = 0.577391304347826, Recall = 0.4955223880597015, Precision = 0.6916666666666667
+# F1 = 0.6884272997032641, Recall = 0.6705202312138728, Precision = 0.7073170731707317
+# F1 = 0.49287169042769857, Recall = 0.4129692832764505, Precision = 0.6111111111111112
+
+# Same without external:
+# Final score of cross-val: F1=0.6922055890292269, Recall = 0.6379411185156659, Precision=0.7575995008588249
+# F1 = 0.5951219512195122, Recall = 0.5462686567164179, Precision = 0.6535714285714286
+# F1 = 0.6951566951566952, Recall = 0.7052023121387283, Precision = 0.6853932584269663
+# F1 = 0.4812623274161736, Recall = 0.41638225255972694, Precision = 0.5700934579439252
+
+# same with SMOTE:
+#F1 = 0.77
+# F1 = 0.6365054602184087, Recall = 0.608955223880597, Precision = 0.6666666666666666
+# F1 = 0.6991404011461319, Recall = 0.7052023121387283, Precision = 0.6931818181818182
+# F1 = 0.5259391771019678, Recall = 0.5017064846416383, Precision = 0.5526315789473685
+
+# External + randx2 + SMOTE:
+# F1 = 0.6141975308641975, Recall = 0.5940298507462687, Precision = 0.6357827476038339
+# F1 = 0.6816901408450704, Recall = 0.6994219653179191, Precision = 0.6648351648351648
+# F1 = 0.5106382978723404, Recall = 0.49146757679180886, Precision = 0.5313653136531366

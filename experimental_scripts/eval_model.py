@@ -15,6 +15,7 @@ import os
 import seaborn as sn
 import matplotlib.pyplot as plt
 
+from utils.dataset import collect_datasets
 from utils.dataset import create_features_for_datasets, add_quality_features
 
 CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards', 'citizenship_gender', 'income_group', 'position_industry']
@@ -84,7 +85,7 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
                     continue
                 term_date = row['termination_date']
                 sample = period_dataset.loc[period_dataset['code'] == code]
-                sample = sample.drop(columns=['recruitment_date', 'termination_date', 'code', 'birth_date'])
+                sample = sample.drop(columns=['recruitment_date', 'termination_date', 'external_factor', 'code', 'birth_date'])
                 sample = sample.drop(
                     columns=[c for c in sample.columns if
                              ('long' in c or 'external' in c or 'overtime' in c or 'index' in c)])
@@ -115,17 +116,14 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
 
 if __name__ == '__main__':
     config = {
-        "test_data_path": "data/24",
+        "test_data_path": "data/24_snap",
         "model_path": "model.pkl"
     }
 
     model = pickle.load(open(config["model_path"], 'rb'))
-    datasets = []
-    for filename in os.listdir(config["test_data_path"]):
-        print(f"Loading file {filename}...")
-        datasets.append(read_csv(os.path.join(config["test_data_path"], filename)))
+    datasets = collect_datasets(config["test_data_path"])
 
-    datasets = create_features_for_datasets(datasets)
+    datasets, _ = create_features_for_datasets(datasets)
     dataset = pd.concat(datasets, axis=0)
 
     encoder = OneHotEncoder()
@@ -137,10 +135,9 @@ if __name__ == '__main__':
 
     print("Test on each dataset separately...")
     for dataset in datasets:
-        dataset = dataset.drop(columns=['recruitment_date', 'termination_date', 'code', 'birth_date'], errors='ignore')
+        strings_to_drop = ['long', "birth", "code", 'overtime', 'termination', 'recruit']
         dataset = dataset.drop(
-            columns=[c for c in dataset.columns if
-                     ('long' in c or 'external' in c or 'overtime' in c or 'index' in c)])
+            columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
         dataset, cat_feature_names = encode_categorical(dataset, encoder)
         dataset = dataset.transpose()
 

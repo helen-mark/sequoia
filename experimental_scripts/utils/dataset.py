@@ -1,7 +1,7 @@
 import tensorflow as tf
 import tensorflow.keras as K
 import pandas as pd
-from pandas import read_csv
+import os
 import numpy as np
 
 
@@ -42,6 +42,22 @@ def encode_categorical_feature(feature: K.Input, name: str, dataset: tf.data.Dat
     # Turn the string input into integer indices
     encoded_feature = lookup(feature)
     return encoded_feature
+
+def collect_datasets(_data_path: str):
+    datasets = []
+    for filename in os.listdir(_data_path):
+        if '.csv' not in filename:
+            continue
+        dataset_path = os.path.join(_data_path, filename)
+        print(filename)
+        dataset = pd.read_csv(dataset_path)
+        print("cols before", dataset.columns)
+        strings_to_drop = ['long',"birth","code",'external_factor_3', 'overtime','termination','recruit']
+        dataset = dataset.drop(
+            columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
+        print("cols after", dataset.columns)
+        datasets.append(dataset)
+    return datasets
 
 
 def DataFilter(x, y):  # remove samples with 0 days before salary increase (as an experiment)
@@ -211,7 +227,7 @@ def add_quality_features(df: pd.DataFrame):
     df['citizenship_gender'] = df['citizenship'].astype(str) + '_' + df['gender'].astype(str)
     df['absences_per_experience'] = df['absenteeism_shortterm'] / (df['seniority'] + 1)
     df['unused_vacation_per_experience'] = df['vacation_days_shortterm'] / (df['seniority'] + 1)
-    df['log_experience'] = np.log1p(df['seniority']+0.5)
+    df['seniority'] = np.log1p(df['seniority']+0.5)
     df['absences_per_year'] = df['absenteeism_shortterm'] / (df['seniority'] / 365 + 0.001)
     df['income_per_experience'] = df['income_shortterm'] / (df['seniority'] + 1)
     df['income_group'] = pd.qcut(df['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
@@ -223,6 +239,7 @@ def add_quality_features(df: pd.DataFrame):
     df['income_vs_industry'] = df['income_shortterm'] - df['industry_avg_income']
     position_median_income = df.groupby('department')['income_shortterm'].median().to_dict()
     df['position_median_income'] = df['department'].map(position_median_income)
+    # df['age_sqr'] = df['age'] ** 2.
 
     calculated_cat_feat = ['citizenship_gender', 'income_group', 'position_industry']
     return df, calculated_cat_feat

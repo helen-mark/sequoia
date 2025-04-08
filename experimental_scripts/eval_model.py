@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from utils.dataset import collect_datasets
 from utils.dataset import create_features_for_datasets, add_quality_features
 
-CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'occupational_hazards', 'citizenship_gender', 'income_group', 'position_industry']
+CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'income_group', 'position_industry']
 
 def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
     encoded_features = _encoder.transform(_dataset[CATEGORICAL_FEATURES]).toarray().astype(int)
@@ -34,7 +34,7 @@ def test_model(_model: K.Model, _feat: pd.DataFrame, _trg: pd.DataFrame):
     r = recall_score(_trg, predictions)
     p = precision_score(_trg, predictions)
 
-    print(f"F1 = {f1}, Recall = {r}, Precision = {p}")
+    print(f"F1 = {f1:.2f}, Recall = {r:.2f}, Precision = {p:.2f}")
     result = confusion_matrix(_trg, predictions)
 
     sn.set(font_scale=1.4)  # for label size
@@ -129,8 +129,8 @@ if __name__ == '__main__':
     encoder = OneHotEncoder()
     encoder.fit(dataset[CATEGORICAL_FEATURES])
     dataset = dataset.reset_index()
-    dataset, cat_feature_names = encode_categorical(dataset, encoder)
-
+    datasets.append(dataset)
+    # dataset, cat_feature_names = encode_categorical(dataset, encoder)
     # test_rowwise(model, dataset)
 
     print("Test on each dataset separately...")

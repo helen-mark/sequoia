@@ -197,6 +197,12 @@ class SequoiaDataset:
         _input_df.columns = new_columns
         return _input_df
 
+    def calc_derivative(self, _values_per_month: pd.DataFrame, _period_months: int, _timepoint_in_past: datetime.date, _cur_val: float):
+        prev_val = self.calc_numerical_average(_values_per_month, _period_months, _timepoint_in_past)
+        if prev_val is None:
+            return None
+        return _cur_val - prev_val
+
 
     def calc_numerical_average(self, _values_per_month: pd.DataFrame, _period_months: int, _snapshot_start: datetime.date):
         assert not _values_per_month.empty
@@ -280,8 +286,8 @@ class SequoiaDataset:
         cur_date_col = pd.to_datetime(_dataset['termination_date'])
         age_col = (cur_date_col - bd_col).dt.days / 365.
         print(f"Age col: {age_col}")
-        _dataset = _dataset.insert(len(_dataset.columns), 'age', age_col)
-        return
+        _dataset.insert(len(_dataset.columns), 'age', age_col)
+        return _dataset
 
 
     def fill_status(self, _dataset: pd.DataFrame):
@@ -292,8 +298,9 @@ class SequoiaDataset:
                 statuses.append(0)
             else:
                 statuses.append(1)
-
+        _dataset = _dataset.drop(columns=['status'], errors='ignore')
         _dataset.insert(len(_dataset.columns), 'status', statuses)
+        return _dataset
 
 
     def seniority_from_term_date(self, _dataset: pd.DataFrame):
@@ -301,9 +308,12 @@ class SequoiaDataset:
         recr_date_col = pd.to_datetime(_dataset['recruitment_date'])
         seniority_col = (cur_date_col - recr_date_col).dt.days / 365.
         print(f"Seniority col: {seniority_col}")
-
+        _dataset = _dataset.drop(columns=['seniority'], errors='ignore')
         _dataset.insert(len(_dataset.columns), 'seniority', seniority_col)
-        return
+        for v in _dataset['seniority'].values:
+            if v > 30:
+                print("Suspicious seniority value:", v)
+        return _dataset
 
     def calc_individual_snapshot_start(self, _snapshot: SnapShot, _start_date: date, _end_date: date):
         initial_offset = _snapshot.initial_offset
@@ -356,7 +366,7 @@ class SequoiaDataset:
     def prepare_sample(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _code: int):
         sample = _feature_df.loc[_feature_df['code'] == _code]
         if sample.empty:
-            print(_code)
+            print(f"Empty sample in function prepare_sample for {_snapshot.num} snapshot: {_code}")
             # logging.info(f"Code {_code} is not present in feature dataframe! Empty sample")
         sample = sample.drop(columns='code')  # leave ony columns with salary values
         # person_recruitment_date = _dataset.loc[_dataset['code'] == _code]['recruitment_date'].item()
@@ -371,21 +381,29 @@ class SequoiaDataset:
 
         for code in _dataset['code']:
             sample = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
-            snapshot_timepoint = self.sample_presets[code].snapshot_start
-            start_date = self.sample_presets[code].start_date
+            preset = self.sample_presets[code]
+            snapshot_timepoint = preset.snapshot_start
+            start_date = preset.start_date
             if not sample.empty and snapshot_timepoint is not None:
                 longterm_period = min(self.max_window, (snapshot_timepoint - start_date).days / 30)
                 shortterm_period = min(self.min_window, (snapshot_timepoint - start_date).days / 30)
-                avg_6m = self.calc_numerical_average(sample, longterm_period, snapshot_timepoint)
-                avg_2m = self.calc_numerical_average(sample, shortterm_period, snapshot_timepoint)
-                _longterm_avg.loc[count] = [code, avg_6m]
-                _shortterm_avg.loc[count] = [code, avg_2m]
+                avg_now = self.calc_numerical_average(sample, shortterm_period, snapshot_timepoint)
+
+                past_year = snapshot_timepoint.year - 1
+                past_timepoint = date(year=past_year, month=snapshot_timepoint.month, day=1)
+                past_timepoint = max(past_timepoint, preset.recr_date)
+                avg_past = self.calc_numerical_average(sample, shortterm_period, past_timepoint)
+                if avg_now is None or avg_past is None:
+                    print(f"Numerical average for {code} is None")
+
+                _longterm_avg.loc[count] = [code, avg_past]
+                _shortterm_avg.loc[count] = [code, avg_now]
             else:
                 _longterm_avg.loc[count] = [code, None]
                 _shortterm_avg.loc[count] = [code, None]
 
-
             count += 1
+
         return _shortterm_avg, _longterm_avg
 
     def calc_time_since_events(self, _events: IrregularEvents, _dataset: pd.DataFrame, _snapshot: SnapShot):
@@ -412,7 +430,9 @@ class SequoiaDataset:
         longterm_col = pd.DataFrame({'code': [], _feature_name + '_longterm': []})
         shortterm_col = pd.DataFrame({'code': [], _feature_name + '_shortterm': []})
 
-        return self.fill_average_values(_dataset, df, longterm_col, shortterm_col, _snapshot)
+        shortterm_col, longterm_col = self.fill_average_values(_dataset, df, longterm_col, shortterm_col, _snapshot)
+        deriv_col = pd.DataFrame({ 'code': longterm_col['code'], _feature_name + '_deriv': shortterm_col.values[:,1]-longterm_col.values[:,1]})
+        return shortterm_col, longterm_col, deriv_col
 
     def calc_external_factors(self, _dataset: pd.DataFrame, _snapshot: SnapShot):
         inflation = read_excel('data_raw/Инфляция.xlsx')
@@ -435,7 +455,7 @@ class SequoiaDataset:
         return result
 
 
-    def process_continuous_features(self, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot, _sheet_name: str, _feature_name: str):
+    def process_continuous_features(self, _dataset: pd.DataFrame, _snapshot: SnapShot, _feature_name: str):
         # feature_col = pd.DataFrame({'code': [], self.continuous_features_names_mapping[_feature_name]: []})
         count = 0
         logging.info(f'Processing continuous feature: {_feature_name}')
@@ -455,16 +475,17 @@ class SequoiaDataset:
         return
 
 
-    def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _full_dataset: pd.DataFrame, _snapshot: SnapShot):
+    def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot):
         snapshot_columns = []
 
         for sheet_name, feature_name in self.time_series_name_mapping.items():
             logging.info(f"Process timeseries: {feature_name}")
             snapshot_columns.extend(self.process_timeseries(_input_file, _dataset, _snapshot, sheet_name, feature_name))
 
+
         # age, overall experience, company seniority:
         for feature_name in ['age', 'seniority']:  # , 'overall_experience']:
-            self.process_continuous_features(_input_file, _dataset, _snapshot, 'Основные данные', feature_name)
+            self.process_continuous_features(_dataset, _snapshot, feature_name)
 
         # ie = IrregularEvents(_input_file, 'days_since_promotion', 'Дата повышения', 'event_list')
         # snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])
@@ -651,9 +672,6 @@ class SequoiaDataset:
                 _input_df = _input_df.drop(axis='index', labels=n)
                 deleted_count += 1
 
-                # elif _snapshot.num > 0 and row['Status'] == 0:  # the employee is dismissed - don't include them into past snapshots
-            #     _input_df = _input_df.drop(axis='index', labels=n)
-            #     deleted_count += 1
 
         logging.info(f"Attention! {deleted_count} rows removed because of short OR not actual working period")
 
@@ -661,17 +679,20 @@ class SequoiaDataset:
             snapshot_dataset = None
         else:
             snapshot_dataset = self.fill_common_features(_common_features, _input_df, snapshot_dataset)
-
             # if _snapshot.num > 0:
             #     snapshot_dataset['status'] = [0 for i in range(len(snapshot_dataset['status']))]
             #     full_dataset['status'] = [0 for i in range(len(full_dataset['status']))]
 
-            if 'status' not in snapshot_dataset.columns:  # client didn't provide status info
-                self.fill_status(snapshot_dataset)
+            if True or 'status' not in snapshot_dataset.columns:  # client didn't provide status info
+                snapshot_dataset = self.fill_status(snapshot_dataset)
+                print(snapshot_dataset)
             if 'age' not in snapshot_dataset.columns:  # client didn't provide age info
-                self.age_from_birth_date(snapshot_dataset)
-            if 'seniority' not in snapshot_dataset.columns:  # client didn't provide company seniority info
-                self.seniority_from_term_date(snapshot_dataset)
+                snapshot_dataset = self.age_from_birth_date(snapshot_dataset)
+                print(snapshot_dataset)
+            if True or 'seniority' not in snapshot_dataset.columns:  # client didn't provide company seniority info
+                snapshot_dataset = self.seniority_from_term_date(snapshot_dataset)
+
+            snapshot_dataset['total_seniority'] = snapshot_dataset['seniority']
 
         return snapshot_dataset, full_dataset
 
@@ -750,19 +771,24 @@ class SequoiaDataset:
         united_dataset = pd.DataFrame()
         while True:
             logging.info(f'Starting snapshot {snapshot.num}')
-            main_dataset, main_dataset_full = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
+            main_dataset, _ = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
+            print('main_dataset seniority:', main_dataset['seniority'])
 
             if main_dataset is None:
                 logging.info(f'No data left for snapshot {snapshot.num}. Finishing process...')
                 break
             logging.debug(f'Formed main part of dataset: {main_dataset}')
             self.prepare_sample_presets(main_dataset, snapshot)
-            full_snapshot_dataset = self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, main_dataset_full, snapshot)
+            full_snapshot_dataset = self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, snapshot)
 
+            nan_rows_n = 0
             for n, row in full_snapshot_dataset.iterrows():
                 if row.isnull().values.any():
-                    logging.info(f"NaN value in snapshot dataset: {row.items}")
+                    nan_rows_n += 1
                     full_snapshot_dataset = full_snapshot_dataset.drop(index=n)
+
+            if nan_rows_n > 0:
+                logging.info(f"{nan_rows_n} rows containing NaN values in snapshot dataset")
 
             # full_snapshot_dataset = self.money_to_gold(full_snapshot_dataset, snapshot)
             full_snapshot_dataset = self.calibrate_income(full_snapshot_dataset, snapshot)

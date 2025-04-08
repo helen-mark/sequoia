@@ -35,4 +35,5 @@ def calc_metric(_predictions: list, _ground_truth: list, _thrs: float):
         return
 
     print(f"TP: {tp}, TN: {tn}, FP: {fp}, FN: {fn}")
+    print(f"Accuracy:", (tp+tn)/(tp+tn+fp+fn))
     print(f"Recall: {tp/(tp+fn)}, Precision: {tp/(tp+fp)}")

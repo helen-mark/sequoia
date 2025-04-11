@@ -299,7 +299,7 @@ class SequoiaDataset:
             else:
                 statuses.append(1)
         _dataset = _dataset.drop(columns=['status'], errors='ignore')
-        _dataset.insert(len(_dataset.columns), 'status', statuses)
+        _dataset.insert(len(_dataset.columns), 'status', np.array(statuses))
         return _dataset
 
 
@@ -376,7 +376,7 @@ class SequoiaDataset:
         #                                                      person_termination_date)
         return sample  # , snapshot_start, person_recruitment_date, person_termination_date
 
-    def fill_average_values(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _snapshot: SnapShot):
+    def extract_features_from_timeseries(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _deriv_col: pd.DataFrame, _snapshot: SnapShot):
         count = 0
 
         for code in _dataset['code']:
@@ -385,26 +385,33 @@ class SequoiaDataset:
             snapshot_timepoint = preset.snapshot_start
             start_date = preset.start_date
             if not sample.empty and snapshot_timepoint is not None:
-                longterm_period = min(self.max_window, (snapshot_timepoint - start_date).days / 30)
+                # longterm_period = min(self.max_window, (snapshot_timepoint - start_date).days / 30)
                 shortterm_period = min(self.min_window, (snapshot_timepoint - start_date).days / 30)
                 avg_now = self.calc_numerical_average(sample, shortterm_period, snapshot_timepoint)
 
                 past_year = snapshot_timepoint.year - 1
                 past_timepoint = date(year=past_year, month=snapshot_timepoint.month, day=1)
                 past_timepoint = max(past_timepoint, preset.recr_date)
+                dt = (snapshot_timepoint - past_timepoint).days / 365.
                 avg_past = self.calc_numerical_average(sample, shortterm_period, past_timepoint)
                 if avg_now is None or avg_past is None:
                     print(f"Numerical average for {code} is None")
+                deriv = (avg_now - avg_past) / dt
+
 
                 _longterm_avg.loc[count] = [code, avg_past]
                 _shortterm_avg.loc[count] = [code, avg_now]
+                _deriv_col.loc[count] = [code, deriv]
             else:
                 _longterm_avg.loc[count] = [code, None]
                 _shortterm_avg.loc[count] = [code, None]
+                _deriv_col.loc[count] = [code, None]
 
             count += 1
-
-        return _shortterm_avg, _longterm_avg
+        # deriv_col = pd.DataFrame({'code': _longterm_avg['code'],
+        #                           _feature_name + '_deriv': (_shortterm_avg.values[:, 1] - _longterm_avg.values[:,
+        #                                                                                  1] / dt)})
+        return _shortterm_avg, _longterm_avg, _deriv_col
 
     def calc_time_since_events(self, _events: IrregularEvents, _dataset: pd.DataFrame, _snapshot: SnapShot):
         time_since_event = pd.DataFrame({'code': [], _events.feature_name: []})
@@ -429,9 +436,9 @@ class SequoiaDataset:
 
         longterm_col = pd.DataFrame({'code': [], _feature_name + '_longterm': []})
         shortterm_col = pd.DataFrame({'code': [], _feature_name + '_shortterm': []})
+        deriv_col = pd.DataFrame({'code': [], _feature_name + '_deriv': []})
 
-        shortterm_col, longterm_col = self.fill_average_values(_dataset, df, longterm_col, shortterm_col, _snapshot)
-        deriv_col = pd.DataFrame({ 'code': longterm_col['code'], _feature_name + '_deriv': shortterm_col.values[:,1]-longterm_col.values[:,1]})
+        shortterm_col, longterm_col, deriv_col = self.extract_features_from_timeseries(_dataset, df, longterm_col, shortterm_col, deriv_col, _snapshot)
         return shortterm_col, longterm_col, deriv_col
 
     def calc_external_factors(self, _dataset: pd.DataFrame, _snapshot: SnapShot):
@@ -759,6 +766,16 @@ class SequoiaDataset:
                 _dataset.loc[n] = row
             self.sample_presets[code] = SamplePreset(person_recruitment_date, person_termination_date, start_date, end_date, snapshot_start)
 
+    def check_nan_values(self, _dataset: pd.DataFrame):
+        nan_rows_n = 0
+        for n, row in _dataset.iterrows():
+            if row.isnull().values.any():
+                nan_rows_n += 1
+                _dataset = _dataset.drop(index=n)
+
+        if nan_rows_n > 0:
+            logging.info(f"{nan_rows_n} rows containing NaN values in snapshot dataset")
+        return _dataset
 
     def run(self):
         data_file_path = os.path.join(self.data_dir, self.filename)
@@ -781,14 +798,7 @@ class SequoiaDataset:
             self.prepare_sample_presets(main_dataset, snapshot)
             full_snapshot_dataset = self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, snapshot)
 
-            nan_rows_n = 0
-            for n, row in full_snapshot_dataset.iterrows():
-                if row.isnull().values.any():
-                    nan_rows_n += 1
-                    full_snapshot_dataset = full_snapshot_dataset.drop(index=n)
-
-            if nan_rows_n > 0:
-                logging.info(f"{nan_rows_n} rows containing NaN values in snapshot dataset")
+            full_snapshot_dataset = self.check_nan_values(full_snapshot_dataset)
 
             # full_snapshot_dataset = self.money_to_gold(full_snapshot_dataset, snapshot)
             full_snapshot_dataset = self.calibrate_income(full_snapshot_dataset, snapshot)

@@ -77,13 +77,30 @@ def job_category(_path: str, _cat_path: str, _feature_name: str):
         title = cat.loc[cat['job_title'] == job_title]
         if title.empty:
             print("No such job title!", job_title)
-            return job_title
+            return 'Other'
         return title['cat'].item()
 
     df['Job title'] = df['Job title'].apply(get_cat)
 
     write(df, _path, _feature_name)
     return df
+
+def region_population(_path: str, _cat_path: str, _feature_name: str):
+    df = pd.read_excel(_path, sheet_name=_feature_name)
+    cat = pd.read_excel(_cat_path, sheet_name='Sheet2')
+
+    def get_cat(region_name: str):
+        region_population_info = cat.loc[cat['region_name'] == region_name]
+        if region_population_info.empty:
+            print("No such region name!", region_name)
+            return 100000
+        return region_population_info['cat'].item()
+
+    df['Region'] = df['Region'].apply(get_cat)
+
+    write(df, _path, _feature_name)
+    return df
+
 
 def create_unique_code(_path: str, _sheet_names: list):
     def generate_unique_number(fio: str):
@@ -136,7 +153,7 @@ def classify_employees(_path1: str, _job_cat_path: str):
         print(v)
 
 
-def working_region(_path: str):
+def print_working_region(_path: str):
     df = pd.read_excel(_path, sheet_name='Основные данные')
 
     work_regions = df['Место работы'].values
@@ -177,13 +194,17 @@ def handle_duplicates(_df: pd.DataFrame, _duplicates_info: dict, _input_type: st
             duplic_type = _duplicates_info[code][0]
             print(f"Duplic type: {duplic_type}")
             if duplic_type == 'multi_job':
-                job_titles_uniq = set(sample['Job title'].values.tolist())  # TODO: if n uniq < n all, then it is a mixed case raider+multi job
+                job_titles_uniq = []  # set(sample['Job title'].values.tolist())  # TODO: if n uniq < n all, then it is a mixed case raider+multi job
                 row = sample.iloc[0]
                 new_sample = sample.copy()[0:0]
-                for n, t in enumerate(job_titles_uniq):
+                for n, row in sample.iterrows():
+                    t = row['Job title']
+                    if t in job_titles_uniq:
+                        continue
                     new_row = row.copy()
                     new_row[ON_COLUMN] = row[ON_COLUMN] + t
                     new_sample.loc[n] = new_row
+                    job_titles_uniq.append(t)
                 sample = new_sample
 
                 job_titles = sample['Job title'].values.tolist()
@@ -209,7 +230,7 @@ def handle_duplicates(_df: pd.DataFrame, _duplicates_info: dict, _input_type: st
                     # Apply cleaning to the last 12 columns
                     sample.iloc[:, -12:] = sample.iloc[:, -12:].applymap(clean_number)
                     # print(sample.iloc[:, -12:].sum(axis=0))
-                    row.iloc[:,-12:] = sample.iloc[:, -12:].sum(axis=0).values
+                    row.iloc[:,-12:] = sample.iloc[:, -12:].max(axis=0).values
                     for period in _duplicates_info[code][1]:
                         new_row = row.copy()
                         new_row[ON_COLUMN] = row[ON_COLUMN] + period[0]
@@ -729,12 +750,12 @@ def handle_timeseries(_time_series_names: list, _company_names: list, _duplicate
     write(df, _final_path, 'Отпуска')
 
 def handle_categorical_variables(_main_dir: str, _final_path: str):
-    job_categories_path = os.path.join(_main_dir, 'job_categories.xlsx')
+    categories_path = os.path.join(_main_dir, 'job_categories.xlsx')
     # classify_employees(_final_path, job_categories_path)
-    job_category(_final_path, job_categories_path, 'Основные данные')
+    job_category(_final_path, categories_path, 'Основные данные')
     filter_job_categories(_final_path, 'Основные данные')
-
-    # working_region(_final_path)
+    region_population(_final_path, categories_path, 'Основные данные')
+    # print_working_region(_final_path)
 
 if __name__ == '__main__':
     time_series_names = ['Отпуска', 'Выплаты', 'Отсутствия', 'Сверхурочка']

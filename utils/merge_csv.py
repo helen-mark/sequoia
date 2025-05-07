@@ -6,7 +6,7 @@ import hashlib
 
 from matplotlib.dates import DAYS_PER_MONTH
 
-ON_COLUMN = 'Full name'
+ON_COLUMN = 'Сотрудник'
 DATA_START_DATE = date(year=2022, month=1, day=1)
 DATA_LOAD_DATE = date(year=2025, month=1, day=1)
 
@@ -71,7 +71,7 @@ def filter_job_categories(_path: str, _feature_name: str):
 
 def job_category(_path: str, _cat_path: str, _feature_name: str):
     df = pd.read_excel(_path, sheet_name=_feature_name)
-    cat = pd.read_excel(_cat_path, sheet_name='Sheet1')
+    cat = pd.read_excel(_cat_path, sheet_name='Sheet3')
 
     def get_cat(job_title: str):
         title = cat.loc[cat['job_title'] == job_title]
@@ -90,13 +90,23 @@ def region_population(_path: str, _cat_path: str, _feature_name: str):
     cat = pd.read_excel(_cat_path, sheet_name='Sheet2')
 
     def get_cat(region_name: str):
-        region_population_info = cat.loc[cat['region_name'] == region_name]
+        region_name = region_name.lstrip()
+        region_population_info = cat.loc[cat['Job location'] == region_name]
         if region_population_info.empty:
             print("No such region name!", region_name)
-            return 100000
-        return region_population_info['cat'].item()
+            return 1000000
+        return region_population_info['Population'].item()
 
-    df['Region'] = df['Region'].apply(get_cat)
+    def get_city(region_name: str):
+        region_name = region_name.lstrip()
+        region_population_info = cat.loc[cat['Job location'] == region_name]
+        if region_population_info.empty:
+            print("No such region name!", region_name)
+            return 'Other'
+        return region_population_info['City'].item()
+
+    df['City_population'] = df['Employer address'].apply(get_cat)
+    df['City'] = df['Employer address'].apply(get_city)
 
     write(df, _path, _feature_name)
     return df
@@ -112,6 +122,7 @@ def create_unique_code(_path: str, _sheet_names: list):
             fio_str = fio_str[0]
         else:
             fio_str = '1'+fio_str[1]
+
         # Используем алгоритм sha256 для получения уникального хэша
         hash_object = hashlib.sha256()
         hash_object.update(fio_str.encode())
@@ -120,7 +131,8 @@ def create_unique_code(_path: str, _sheet_names: list):
         # Генерируем уникальный 6-значный номер
         unique_number = int(hashed_fio[:6], 16)
 
-        return  6600000000 + unique_number
+        # return int('1111' + fio_str)  # polimer.
+        return unique_number + 3300000000  # SWG
 
     writer = pd.ExcelWriter(_path, mode='a', if_sheet_exists='replace', engine='openpyxl')
     for sn in _sheet_names:
@@ -156,7 +168,7 @@ def classify_employees(_path1: str, _job_cat_path: str):
 def print_working_region(_path: str):
     df = pd.read_excel(_path, sheet_name='Основные данные')
 
-    work_regions = df['Место работы'].values
+    work_regions = df['Employer address'].values
     unique_set = set(work_regions)
     for v in unique_set:
         print(v)
@@ -465,7 +477,7 @@ def add_zero_vacations(_main_path: str, _feature_name: str):
             print(len(ts_df.columns))
             ts_df = pd.concat([ts_df, tmp], axis=0)
 
-    write(ts_df, _main_path, _feature_name+'_zeros')
+    write(ts_df, _main_path, _feature_name)
 
 
 def str_to_datetime(_date_str: str):
@@ -515,7 +527,7 @@ def events_to_timeseries(_path_events: str, _trg_path: str, _feature_name: str, 
     write(df_res, _trg_path, _feature_name)
 
 
-def vacation_to_timeseries(_path_events: str, _path2: str, _trg_path: str, _feature_name: str, _check_feature: bool = False):
+def vacations_to_timeseries(_path_events: str, _path2: str, _trg_path: str, _feature_name: str, _check_feature: bool = False):
     df_res = pd.DataFrame(columns=[ON_COLUMN, 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sept', 'oct', 'nov', 'dec'])
 
     print('\nMaking time series\n', _path_events)
@@ -663,7 +675,7 @@ def merge_people(_df: pd.DataFrame, _merged: dict):
 
 def concat_timeseries(feature_dir: str, _company_name: str, _feature_name: str, _final_path: str):
     # this doesn't provide correct merge of time series, but serves to reveal non-residents with multiple hire dates
-    res_df = merge_tables(_path=feature_dir, _duplicates_info=None, _feature_name=_feature_name, _post_remove_duplicates=False, _check_feature=False, _gather_duplicates=True)
+    res_df = merge_tables(_path=feature_dir, _duplicates_info=None, _feature_name=_feature_name, _post_remove_duplicates=True, _check_feature=False, _gather_duplicates=True)
     # write(res_df, _final_path, _feature_name)
     return res_df
 
@@ -672,7 +684,7 @@ def merge_main_data(_main_dir: str, _company_names: list, _feature_name: str, _f
     for company_name in _company_names:
         print(f"Merging common data for {company_name}...")
         company_dir = os.path.join(_main_dir, company_name)
-        res_df = merge_tables(_path=company_dir, _duplicates_info=_duplicates_info[company_name], _feature_name=_feature_name, _post_remove_duplicates=False, _check_feature=False)
+        res_df = merge_tables(_path=company_dir, _duplicates_info=None if _duplicates_info is None else _duplicates_info[company_name], _feature_name=_feature_name, _post_remove_duplicates=True, _check_feature=True)
         companies_main_data.append(res_df)
         print(len(res_df))
 
@@ -721,25 +733,25 @@ def get_full_duplicates_info(_time_series_names: list, _company_names: list, _da
 
 
 def handle_timeseries(_time_series_names: list, _company_names: list, _duplicates_info: dict, _data_dir: str, _final_path: str):
-    # for time_series_name in _time_series_names:
-    #     # merge_tables(company_dir, company_name)
-    #     for company_name in _company_names:
-    #         company_dir = os.path.join(_data_dir, company_name)
-    #         sub_fold = os.path.join(company_dir, time_series_name)
-    #         res_path = company_dir + '_' + time_series_name + '_1.xlsx'
-    #         # filename = time_series_name + '.xlsx'
-    #         # time_series_dfs.append(pd.read_excel(os.path.join(company_dir, filename)))
-    #         merge_timeseries(_path=sub_fold, _res_path=res_path, _time_series_name=time_series_name, _post_remove_duplicates=False, _duplicates_info=_duplicates_info[company_name])
-    #
-    # # then merge timeseries of different companies:
-    # for dirpath, dirnames, filenames in os.walk(_data_dir):
-    #     if dirpath == _data_dir:
-    #         for time_series_name in _time_series_names:
-    #             ts_res = merge_tables(_data_dir, None, time_series_name, False, True)
-    #             write(ts_res, _final_path, time_series_name)
-    #
-    # add_zero_lines(_final_path, 'Отсутствия')
-    # add_zero_vacations(_final_path, 'Отпуска')
+    for time_series_name in _time_series_names:
+        # merge_tables(company_dir, company_name)
+        for company_name in _company_names:
+            company_dir = os.path.join(_data_dir, company_name)
+            sub_fold = os.path.join(company_dir, time_series_name)
+            res_path = company_dir + '_' + time_series_name + '_1.xlsx'
+            # filename = time_series_name + '.xlsx'
+            # time_series_dfs.append(pd.read_excel(os.path.join(company_dir, filename)))
+            merge_timeseries(_path=sub_fold, _res_path=res_path, _time_series_name=time_series_name, _post_remove_duplicates=True, _duplicates_info=_duplicates_info[company_name])
+
+    # then merge timeseries of different companies:
+    for dirpath, dirnames, filenames in os.walk(_data_dir):
+        if dirpath == _data_dir:
+            for time_series_name in _time_series_names:
+                ts_res = merge_tables(_data_dir, None, time_series_name, False, True)
+                write(ts_res, _final_path, time_series_name)
+
+    add_zero_lines(_final_path, 'Отсутствия')
+    add_zero_vacations(_final_path, 'Отпуска')
 
     # fill empty cells with zeros for absenteism table:
     df = pd.read_excel(_final_path, sheet_name='Отсутствия')
@@ -752,36 +764,36 @@ def handle_timeseries(_time_series_names: list, _company_names: list, _duplicate
 def handle_categorical_variables(_main_dir: str, _final_path: str):
     categories_path = os.path.join(_main_dir, 'job_categories.xlsx')
     # classify_employees(_final_path, job_categories_path)
-    job_category(_final_path, categories_path, 'Основные данные')
-    filter_job_categories(_final_path, 'Основные данные')
+    #job_category(_final_path, categories_path, 'Основные данные')
+    #filter_job_categories(_final_path, 'Основные данные')
     region_population(_final_path, categories_path, 'Основные данные')
     # print_working_region(_final_path)
 
 if __name__ == '__main__':
     time_series_names = ['Отпуска', 'Выплаты', 'Отсутствия', 'Сверхурочка']
     main_dir = '/home/elena/ATTRITION/sequoia/'
-    company_names = ['Вига-65', 'Берендсен', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
-    data_dir_name = 'Выгрузка'
+    company_names = ['SWG']  # ['Вига-65', 'Берендсен', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
+    data_dir_name = 'SWG'
     data_dir = os.path.join(main_dir, data_dir_name)
 
     final_filename = data_dir_name + '_final.xlsx'
     final_path = os.path.join(data_dir, final_filename)
 
-    check_some_statistics()
+    # check_some_statistics()
 
     # First merge Maki and Kover into Mat
     # merge_companies(main_dir, time_series_names)
 
-    # events_to_timeseries_path = os.path.join(data_dir, 'Отсутствия_22.xlsx')
-    # vacations_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2024.xlsx'), os.path.join(data_dir, 'Остатки отпусков 01.01.2024.xlsx'), events_to_timeseries_path, 'Отпуск')
-    # events_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2022.xlsx'), events_to_timeseries_path, 'Отсутствия')
+    #events_to_timeseries_path = os.path.join(data_dir, 'Отсутствия_22.xlsx')
+    #vacations_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2024.xlsx'), os.path.join(data_dir, 'Остатки отпусков 01.01.2024.xlsx'), events_to_timeseries_path, 'Отпуск')
+    #events_to_timeseries(os.path.join(data_dir, 'Неявки', 'Неявки 2022.xlsx'), events_to_timeseries_path, 'Отсутствия')
     duplicates_info = {}  # get_full_duplicates_info(time_series_names, company_names, data_dir)
 
-    # merge_main_data(data_dir, company_names, 'Основные данные', final_path, duplicates_info)
+    #merge_main_data(data_dir, company_names, 'Основные данные', final_path, None)
 
-    handle_timeseries(time_series_names, company_names, duplicates_info, data_dir, final_path)
+    #handle_timeseries(time_series_names, company_names, duplicates_info, data_dir, final_path)
 
-    # create_unique_code(final_path, time_series_names + ['Основные данные'])
+    create_unique_code(final_path, ['Основные данные'])
 
     # Finally, apply job categories:
     # handle_categorical_variables(main_dir, final_path)
@@ -789,7 +801,6 @@ if __name__ == '__main__':
 
     # for dirpath, dirnames, filenames in os.walk(data_dir):
     #     for filename in filenames:
-    #         # print("Working with file", filename)
     #         path_to_file = os.path.join(dirpath, filename)
     #         # df = pd.read_excel(path_to_file)
     #         # check_duplicates(df)

@@ -3,19 +3,19 @@ data_location:
   trg_path: 'data/'
 
 #  file_name: 'seq_final.xlsx'  # check file extension
-#  output_name: 'sequoia_dataset_dsm.csv'
+#  output_name: 'sequoia_dataset_2223.csv'
 #data:
 #  region: 'Москва'
 #  industry: 'Light industry'  #  Metals, Light industry
 
-#  file_name: 'SWG_final.xlsx'  # check file extension
-#  output_name: 'swg_dataset_dsm.csv'
+#  file_name: 'SWG_final1.xlsx'  # check file extension
+#  output_name: 'swg_dataset_2223.csv'
 #data:
 #  region: 'Москва'
 #  industry: 'Light industry'  #  Metals, Light industry
 
   file_name: 'polimer.xlsx'  # check file extension
-  output_name: 'polimer_dataset_dsm.csv'
+  output_name: 'polimer_dataset_24.csv'
 data:
   region: 'Оренбург'
   industry: 'Metals'  #  Metals, Light industry
@@ -24,18 +24,18 @@ data:
   remove_short_service: False
   date_format: '%Y.%m.%d'
   data_load_date: '01.01.2025'
-  data_begin_date: '01.01.2022'
+  data_begin_date: '01.01.2024'
 time_snapshots:
-  snapshot_step: 3  # months
+  snapshot_step: 4  # months
   snapshot_min_duration: 1
   snapshot_initial_offset: 1
-  max_snapshots_number: 1
-  min_window: 3
-  max_window: 6
+  max_snapshots_number: 3
+  min_window: 2
+  max_window: 4
   random_snapshot: False
 options:
-  forecast_horison: 36  # 'left' workers turn into 'working' if observed this long before dismissal
-  remove_censored: False
+  forecast_horison: 6  # 'left' workers turn into 'working' if observed this long before dismissal
+  remove_censored: True
 required_sheets:
   basic:
     name: 'Основные данные'
@@ -117,6 +117,14 @@ required_sheets:
       f20:
         name: 'Birth date'
         name_out: 'birth_date'
+        kind: 'common'
+      f21:
+        name: 'City'
+        name_out: 'city'
+        kind: 'common'
+      f22:
+        name: 'City_population'
+        name_out: 'city_population'
         kind: 'common'
 #  salary:
 #    name: 'Оплата труда'

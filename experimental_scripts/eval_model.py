@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from utils.dataset import collect_datasets
 from utils.dataset import create_features_for_datasets, add_quality_features
 
-CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'income_group', 'position_industry']
+CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'city', 'income_group', 'position_industry', 'region_population_group']
 
 def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
     encoded_features = _encoder.transform(_dataset[CATEGORICAL_FEATURES]).toarray().astype(int)
@@ -116,33 +116,39 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
 
 if __name__ == '__main__':
     config = {
-        "test_data_path": "data/24_snap",
+        "test_data_path": "data/24_snap_4_city",
+        'train_data_path': 'data/2223_snap_4_city',
         "model_path": "model.pkl"
     }
 
     model = pickle.load(open(config["model_path"], 'rb'))
     datasets = collect_datasets(config["test_data_path"])
+    train_datasets = collect_datasets(config['train_data_path'])
 
     datasets, _ = create_features_for_datasets(datasets)
-    dataset = pd.concat(datasets, axis=0)
+    dataset = pd.concat(datasets+train_datasets, axis=0)
 
     encoder = OneHotEncoder()
     encoder.fit(dataset[CATEGORICAL_FEATURES])
     dataset = dataset.reset_index()
-    datasets.append(dataset)
+    datasets.append(pd.concat(datasets, axis=0))
     # dataset, cat_feature_names = encode_categorical(dataset, encoder)
     # test_rowwise(model, dataset)
 
     print("Test on each dataset separately...")
-    for dataset in datasets:
+    for d in datasets:
         strings_to_drop = ['long', "birth", "code", 'overtime', 'termination', 'recruit']
-        dataset = dataset.drop(
-            columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
-        dataset, cat_feature_names = encode_categorical(dataset, encoder)
-        dataset = dataset.transpose()
+        d = d.drop(
+            columns=[c for c in d.columns if any(string in c for string in strings_to_drop)])
+        d = d.reset_index()
+        d, cat_feature_names = encode_categorical(d, encoder)
+        d = d.transpose()
 
-        feat = dataset[:-1].transpose()
-        trg = dataset[-1:].transpose()
+        feat = d[:-1].transpose()
+        trg = d[-1:].transpose()
 
         # feat.insert(12, 'occupational_hazards_4', [0 for i in range(len(feat))])
-        test_model(model, feat, trg)
+        try:
+            test_model(model, feat, trg)
+        except Exception as e:
+            print(e)

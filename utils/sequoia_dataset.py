@@ -1,7 +1,7 @@
 import os
 import random
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import pandas as pd
 import numpy as np
 import yaml
@@ -361,7 +361,10 @@ class SequoiaDataset:
     @staticmethod
     def str_to_datetime(_date_str: str):
         splt = _date_str.split('.')
-        return date(int(splt[2]), int(splt[1]), int(splt[0]))
+        if len(splt) < 3:
+            splt = _date_str.split('/')
+            return date(int(splt[0]), int(splt[1]), int(splt[2]))  # european order
+        return date(int(splt[2]), int(splt[1]), int(splt[0]))  # russian order
 
     def prepare_sample(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _code: int):
         sample = _feature_df.loc[_feature_df['code'] == _code]
@@ -391,12 +394,14 @@ class SequoiaDataset:
 
                 past_year = snapshot_timepoint.year - 1
                 past_timepoint = date(year=past_year, month=snapshot_timepoint.month, day=1)
-                past_timepoint = max(past_timepoint, preset.recr_date)
-                dt = (snapshot_timepoint - past_timepoint).days / 365.
+                past_timepoint = max(past_timepoint, start_date + timedelta(days=_snapshot.min_duration * 30 / 3.))
+                dt = abs((snapshot_timepoint - past_timepoint).days / 365.)
                 avg_past = self.calc_numerical_average(sample, shortterm_period, past_timepoint)
                 if avg_now is None or avg_past is None:
                     print(f"Numerical average for {code} is None")
-                deriv = (avg_now - avg_past) / dt
+                    deriv = None
+                else:
+                    deriv = (avg_now - avg_past) / (dt + 0.01)
 
 
                 _longterm_avg.loc[count] = [code, avg_past]
@@ -589,14 +594,7 @@ class SequoiaDataset:
         elif f_name == 'to_work_travel_time':
             return float(key)
         elif f_name == 'department':
-            if key in office:
-                return 1
-            elif key in sales:
-                return 0
-            elif key in blue_collar:
-                return 2
-            else:
-                raise ValueError(f'Invalid department format: {key}')
+            return key
         elif f_name == 'n_employers':
             #if not key.isdigit():
             #    raise TypeError(f'Unexpected n_employers value: {key}')
@@ -622,6 +620,10 @@ class SequoiaDataset:
             return key
         elif f_name == 'seniority':
             return key
+        elif f_name == 'city':
+            return key
+        elif f_name == 'city_population':
+            return int(key)
         else:
             raise ValueError(f'Invalid feature name passed to lookup(): {f_name}')
 
@@ -702,6 +704,27 @@ class SequoiaDataset:
             snapshot_dataset['total_seniority'] = snapshot_dataset['seniority']
 
         return snapshot_dataset, full_dataset
+
+
+    def salary_by_city(self, _dataset: pd.DataFrame):
+        salary_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='Sheet1', index_col=0)
+        _dataset['salary_by_city'] = _dataset.apply(
+            lambda row: salary_df.loc[row['city'], row['department']]
+            if row['city'] in salary_df.index and row['department'] in salary_df.columns
+            else 80000,
+            axis=1
+        )
+        return _dataset
+
+    def vacations_by_city(self, _dataset: pd.DataFrame):
+        vacations_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='Sheet2', index_col=0)
+        _dataset['vacations_by_city'] = _dataset.apply(
+            lambda row: vacations_df.loc[row['city'], row['department']]
+            if row['city'] in vacations_df.index and row['department'] in vacations_df.columns
+            else 10,
+            axis=1
+        )
+        return _dataset
 
     @classmethod
     def rubles_to_gold(self, _salary: int, _date: date):
@@ -789,7 +812,6 @@ class SequoiaDataset:
         while True:
             logging.info(f'Starting snapshot {snapshot.num}')
             main_dataset, _ = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
-            print('main_dataset seniority:', main_dataset['seniority'])
 
             if main_dataset is None:
                 logging.info(f'No data left for snapshot {snapshot.num}. Finishing process...')
@@ -800,7 +822,8 @@ class SequoiaDataset:
 
             full_snapshot_dataset = self.check_nan_values(full_snapshot_dataset)
 
-            # full_snapshot_dataset = self.money_to_gold(full_snapshot_dataset, snapshot)
+            full_snapshot_dataset = self.salary_by_city(full_snapshot_dataset)
+            full_snapshot_dataset = self.vacations_by_city(full_snapshot_dataset)
             full_snapshot_dataset = self.calibrate_income(full_snapshot_dataset, snapshot)
 
             # assign employee codes with current snapshot mark:

@@ -232,10 +232,10 @@ def get_split(_dataset: pd.DataFrame, _test_split: float, _split_state: int):
 
     return trn, val, test
 
-def prepare_dataset_2(_datasets: list, _make_synthetic: bool, _encode_categorical: bool, _test_split: float, _cat_feat: list, _split_rand_state: int):
+def prepare_dataset_2(_datasets: list, _test_datasets: list, _make_synthetic: bool, _encode_categorical: bool, _test_split: float, _cat_feat: list, _split_rand_state: int):
     cat_feature_names = _cat_feat
     if _encode_categorical:
-        concat_dataset = pd.concat(_datasets)
+        concat_dataset = pd.concat(_datasets+_test_datasets)
         encoder = OneHotEncoder()
         encoder.fit(concat_dataset[_cat_feat])
 
@@ -437,34 +437,69 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
 
     return all_features_reg, all_features_nonreg, all_inputs_reg, all_inputs_nonreg
 
-def add_quality_features(df: pd.DataFrame):
+def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
     # df['age_group'] = pd.cut(df['age'], bins=[18, 25, 35, 45, 55, 65],
     #                         labels=['18-25', '26-35', '36-45', '46-55', '56-65'])
     # df['gender_age'] = df['gender'].astype(str) + '_' + df['age_group'].astype(str)
     # df['citizenship_gender'] = df['citizenship'].astype(str) + '_' + df['gender'].astype(str)
+    print(df)
     df['absences_per_experience'] = df['absenteeism_shortterm'] / (df['seniority'] + 1)
     df['unused_vacation_per_experience'] = df['vacation_days_shortterm'] / (df['seniority'] + 1)
     df['log_seniority'] = np.log1p(df['seniority']+0.5)
     df['absences_per_year'] = df['absenteeism_shortterm'] / (df['seniority'] / 365 + 0.001)
     df['income_per_experience'] = df['income_shortterm'] / (df['seniority'] + 1)
-    df['income_group'] = pd.qcut(df['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
+    quantiles = pd.qcut(_total_ds['income_shortterm'], q=5, retbins=True)[1]
+
+    # Then apply these same boundaries to your subset dataframe
+    df['income_group'] = pd.cut(
+        df['income_shortterm'],
+        bins=quantiles,
+        labels=['low', 'medium_low', 'medium', 'medium_high', 'high'][:len(quantiles)-1],
+        include_lowest=True
+    )
+
+    # df['income_group'] = pd.qcut(_total_ds['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
+    quantiles = pd.qcut(_total_ds['city_population'], q=5, retbins=True, duplicates='drop')[1]
+    df['region_population_group'] = pd.cut(
+        df['city_population'],
+        bins=quantiles,
+        labels=['low', 'medium_low', 'medium', 'medium_high', 'high'][:len(quantiles)-1],
+        include_lowest=True
+    )
+    #df['region_population_group'] = pd.qcut(_total_ds['region'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'], duplicates='drop')
+
     df['position_industry'] = df['department'].astype(str) + '_' + df['field'].astype(str)
     # df['harm_position'] = df['occupational_hazards'].astype(str) + '_' + df['department'].astype(str)
     # df['harm_experience'] = df['occupational_hazards'].astype(str) + '_' + df['seniority'].astype(str)
-    industry_avg_income = df.groupby('field')['income_shortterm'].mean().to_dict()
+    industry_avg_income = _total_ds.groupby('field')['income_shortterm'].mean().to_dict()
     df['industry_avg_income'] = df['field'].map(industry_avg_income)
     df['income_vs_industry'] = df['income_shortterm'] - df['industry_avg_income']
+
+    df['salary_by_city'] = np.where(
+        df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
+        90000,  # Default value when divisor is invalid
+        df['salary_by_city']
+    )
+    df['salary_vs_city'] = np.where(
+        df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
+        1,  # Default value when divisor is invalid
+        df['income_shortterm'] / df['salary_by_city']
+    )
     position_median_income = df.groupby('department')['income_shortterm'].median().to_dict()
     df['position_median_income'] = df['department'].map(position_median_income)
     # df['age_sqr'] = df['age'] ** 2.
 
-    calculated_cat_feat = ['income_group', 'position_industry']  #, 'citizenship_gender']
+    calculated_cat_feat = ['income_group', 'position_industry', 'region_population_group']  #, 'citizenship_gender']
     return df, calculated_cat_feat
 
 def create_features_for_datasets(_datasets: list):
     improved_datasets = []
+    print("Len\n",len(_datasets))
+    tot_ds = pd.concat(_datasets, axis=0)
+    print("TOT\n", tot_ds)
     for d in _datasets:
-        d, new_cat_feat = add_quality_features(d)
+        print("next\n", d)
+        d, new_cat_feat = add_quality_features(d, tot_ds)
         cols = d.columns.tolist()
         print(cols)
         cols.remove('status')

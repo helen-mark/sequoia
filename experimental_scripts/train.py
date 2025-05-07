@@ -400,22 +400,25 @@ def calc_weights(_y_train: pd.DataFrame, _y_val: pd.DataFrame):
 
 
 def main(_config: dict):
-    data_path = config['dataset_src']
+    data_path = _config['dataset_src']
+    test_path = _config['test_src']
     datasets = collect_datasets(data_path)
-    rand_states = range(5)  # [777, 42, 6, 1370, 5087]
+    test_datasets = collect_datasets(test_path)
+    rand_states = [4] # range(5)  # [777, 42, 6, 1370, 5087]
     score = [0, 0, 0]
 
     if _config['calculated_features']:
         datasets, new_cat_feat = create_features_for_datasets(datasets)
         _config['cat_features'] += new_cat_feat
+        print(f"New cat features: {_config['cat_features']}")
 
     for split_rand_state in rand_states:
-        d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(datasets, config['make_synthetic'], config['encode_categorical'], config['test_split'], config['cat_features'], split_rand_state)
+        d_train, d_val, d_test, cat_feats_encoded = prepare_dataset_2(datasets, test_datasets, _config['make_synthetic'], _config['encode_categorical'], _config['test_split'], _config['cat_features'], split_rand_state)
 
         if _config['smote']:
-            d_train = minority_class_resample(d_train, config['cat_features'])
-            d_val = minority_class_resample(d_val, config['cat_features'])
-            d_test = minority_class_resample(d_test, config['cat_features'])
+            d_train = minority_class_resample(d_train,cat_feats_encoded)
+            d_val = minority_class_resample(d_val, cat_feats_encoded)
+            d_test = minority_class_resample(d_test, cat_feats_encoded)
 
         x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test)
         # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
@@ -424,13 +427,13 @@ def main(_config: dict):
         sample_weight = calc_weights(y_train, y_val)
 
         # print(sample_weight)
-        trained_model = train(x_train, y_train, x_val, y_val, sample_weight, cat_feats_encoded, config['model'], config['num_iters'], config['maximize'])
+        trained_model = train(x_train, y_train, x_val, y_val, sample_weight, cat_feats_encoded, _config['model'], _config['num_iters'], _config['maximize'])
         f1, r, p = test(trained_model, d_test)
         score[0] += f1
         score[1] += r
         score[2] += p
 
-        if config['model'] == 'RandomForestClassifier':
+        if _config['model'] == 'RandomForestClassifier':
            show_decision_tree(trained_model)
 
     score = (score[0] / len(rand_states), score[1] / len(rand_states), score[2] / len(rand_states))
@@ -449,12 +452,13 @@ if __name__ == '__main__':
         'normalize': False,  # normalize input values or not
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/dsm',  # 2223_snap_randx2',
+        'dataset_src': 'data/2223_snap_4_city',
+        'test_src': 'data/24_snap_4_city',
         'encode_categorical': True,
         'calculated_features': True,
-        'make_synthetic': 'sdv',  # options: 'sdv', 'ydata', None
+        'make_synthetic': None,  # options: 'sdv', 'ydata', None
         'smote': True,  # perhaps not needed for catboost and in case if minority : majority > 0.5
-        'cat_features': ['gender', 'citizenship', 'department', 'field']  #, 'occupational_hazards']
+        'cat_features': ['gender', 'citizenship', 'department', 'field', 'city']  #, 'occupational_hazards']
     }
 
     main(config)

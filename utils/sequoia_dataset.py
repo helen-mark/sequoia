@@ -363,8 +363,11 @@ class SequoiaDataset:
         splt = _date_str.split('.')
         if len(splt) < 3:
             splt = _date_str.split('/')
+            if len(splt) < 3:
+                splt = _date_str.split('-')
+                return date(int(splt[0]), int(splt[1]), int(splt[2][:2]))
             return date(int(splt[0]), int(splt[1]), int(splt[2]))  # european order
-        return date(int(splt[2]), int(splt[1]), int(splt[0]))  # russian order
+        return date(int(splt[2]), int(splt[1]), int(splt[0][:2]))  # russian order
 
     def prepare_sample(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _code: int):
         sample = _feature_df.loc[_feature_df['code'] == _code]
@@ -611,7 +614,7 @@ class SequoiaDataset:
             else:
                 raise ValueError(f'Invalid hazard format: {key}')
         elif f_name in ['recruitment_date', 'termination_date', 'birth_date']:
-            if key is None or str(key) == 'nan':  # no date of dismissal
+            if key is None or str(key) == 'nan' or pd.isna(key):  # no date of dismissal
                 return None
             return self.str_to_datetime(str(key))
         elif f_name == 'status':
@@ -648,7 +651,7 @@ class SequoiaDataset:
             code = row["Code"]
             status = 1
 
-            if term_date is None or str(term_date) == 'nan':
+            if term_date is None or str(term_date) == 'nan' or pd.isna(term_date):
                 row['Date of dismissal'] = self.data_load_date
                 term_date = row['Date of dismissal']
                 _input_df.loc[n] = row

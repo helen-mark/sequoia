@@ -14,10 +14,16 @@ data_location:
 #  region: 'Москва'
 #  industry: 'Light industry'  #  Metals, Light industry
 
-  file_name: 'polimer.xlsx'  # check file extension
-  output_name: 'polimer_dataset_24.csv'
+#  file_name: 'polimer.xlsx'  # check file extension
+#  output_name: 'polimer_dataset_24.csv'
+#data:
+#  region: 'Оренбург'
+#  industry: 'Metals'  #  Metals, Light industry
+
+  file_name: 'Химик_final.xlsx'  # check file extension
+  output_name: 'chemistry_dataset_24.csv'
 data:
-  region: 'Оренбург'
+  region: 'Москва'
   industry: 'Metals'  #  Metals, Light industry
 
   income_calibration: 'Inflation'  # Living wage, Inflation
@@ -35,7 +41,7 @@ time_snapshots:
   random_snapshot: False
 options:
   forecast_horison: 6  # 'left' workers turn into 'working' if observed this long before dismissal
-  remove_censored: True
+  remove_censored: False
 required_sheets:
   basic:
     name: 'Основные данные'

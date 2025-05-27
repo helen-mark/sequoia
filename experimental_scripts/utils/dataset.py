@@ -460,6 +460,7 @@ def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
 
     # df['income_group'] = pd.qcut(_total_ds['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
     quantiles = pd.qcut(_total_ds['city_population'], q=5, retbins=True, duplicates='drop')[1]
+    print(quantiles)
     df['region_population_group'] = pd.cut(
         df['city_population'],
         bins=quantiles,

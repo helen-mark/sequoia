@@ -764,16 +764,16 @@ def handle_timeseries(_time_series_names: list, _company_names: list, _duplicate
 def handle_categorical_variables(_main_dir: str, _final_path: str):
     categories_path = os.path.join(_main_dir, 'job_categories.xlsx')
     # classify_employees(_final_path, job_categories_path)
-    #job_category(_final_path, categories_path, 'Основные данные')
-    #filter_job_categories(_final_path, 'Основные данные')
+    job_category(_final_path, categories_path, 'Основные данные')
+    filter_job_categories(_final_path, 'Основные данные')
     region_population(_final_path, categories_path, 'Основные данные')
     # print_working_region(_final_path)
 
 if __name__ == '__main__':
     time_series_names = ['Отпуска', 'Выплаты', 'Отсутствия', 'Сверхурочка']
     main_dir = '/home/elena/ATTRITION/sequoia/'
-    company_names = ['SWG']  # ['Вига-65', 'Берендсен', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
-    data_dir_name = 'SWG'
+    company_names = ['Химик']  # ['Вига-65', 'Берендсен', 'Рентекс-Сервис', 'Новость', 'МатСервис_МакиСервис_КовёрСервис']
+    data_dir_name = 'Химик'
     data_dir = os.path.join(main_dir, data_dir_name)
 
     final_filename = data_dir_name + '_final.xlsx'
@@ -793,10 +793,10 @@ if __name__ == '__main__':
 
     #handle_timeseries(time_series_names, company_names, duplicates_info, data_dir, final_path)
 
-    create_unique_code(final_path, ['Основные данные'])
+    #create_unique_code(final_path, ['Основные данные'])
 
     # Finally, apply job categories:
-    # handle_categorical_variables(main_dir, final_path)
+    handle_categorical_variables(main_dir, final_path)
 
 
     # for dirpath, dirnames, filenames in os.walk(data_dir):

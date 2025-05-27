@@ -28,7 +28,9 @@ def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
 
 
 def test_model(_model: K.Model, _feat: pd.DataFrame, _trg: pd.DataFrame):
-    predictions = model.predict(_feat)
+    predictions = model.predict_proba(_feat)
+    print(predictions)
+    predictions = [int(p[1] > 0.45) for p in predictions]
 
     f1 = f1_score(_trg, predictions)
     r = recall_score(_trg, predictions)
@@ -116,31 +118,38 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
 
 if __name__ == '__main__':
     config = {
-        "test_data_path": "data/24_snap_4_city",
+        "test_data_path": "data/",
         'train_data_path': 'data/2223_snap_4_city',
         "model_path": "model.pkl"
     }
 
     model = pickle.load(open(config["model_path"], 'rb'))
     datasets = collect_datasets(config["test_data_path"])
+    n_test_datasets = len(datasets)
     train_datasets = collect_datasets(config['train_data_path'])
+    all_datasets = datasets + train_datasets
 
-    datasets, _ = create_features_for_datasets(datasets)
-    dataset = pd.concat(datasets+train_datasets, axis=0)
+    all_datasets, _ = create_features_for_datasets(all_datasets)
 
+    dataset_to_encode = pd.concat(train_datasets, axis=0)
     encoder = OneHotEncoder()
-    encoder.fit(dataset[CATEGORICAL_FEATURES])
-    dataset = dataset.reset_index()
-    datasets.append(pd.concat(datasets, axis=0))
+    encoder.fit(dataset_to_encode[CATEGORICAL_FEATURES])
+    dataset_to_encode = dataset_to_encode.reset_index()
+
+    test_datasets = all_datasets[:n_test_datasets]
+    if n_test_datasets > 1:
+        test_datasets.append(pd.concat(test_datasets, axis=0))
     # dataset, cat_feature_names = encode_categorical(dataset, encoder)
     # test_rowwise(model, dataset)
 
     print("Test on each dataset separately...")
-    for d in datasets:
-        strings_to_drop = ['long', "birth", "code", 'overtime', 'termination', 'recruit']
+    for d in test_datasets:
+        strings_to_drop = ['long', "birth", "code", 'overtime', 'termination', 'recruit', 'index']
         d = d.drop(
             columns=[c for c in d.columns if any(string in c for string in strings_to_drop)])
         d = d.reset_index()
+        print(d.columns)
+
         d, cat_feature_names = encode_categorical(d, encoder)
         d = d.transpose()
 

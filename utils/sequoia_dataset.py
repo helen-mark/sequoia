@@ -510,20 +510,6 @@ class SequoiaDataset:
 
         snapshot_columns.extend(self.calc_external_factors(_dataset, _snapshot))
 
-        # sheet_name = 'Структура компании'
-        # df = read_excel(_input_file, sheet_name=sheet_name)
-        # df = df.drop(columns='№')
-        # df.columns = ['code', 'department', 'manager']
-        # count = 0
-        #
-        # for code in _dataset['code']:
-        #     sample, snapshot_start, _, _ = self.prepare_sample(df, _dataset, _snapshot, code)
-        #     manager_code = sample.iloc[0].values[-1]
-        #     manager_sample = _full_dataset.loc[_full_dataset['code'] == manager_code]
-        #     manager_term_date = manager_sample['termination_date'].item()
-        #
-        #     count += 1
-
         for new_col in snapshot_columns:
             _dataset = _dataset.merge(new_col, on='code', how='outer')
 

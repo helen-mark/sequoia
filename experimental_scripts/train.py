@@ -79,7 +79,7 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
     # model already initialized with latest version of optimized parameters for our dataset
     model = CatBoostClassifier(
-        iterations=2000,  # default to 1000
+        iterations=500,  # default to 1000
         learning_rate=0.1,
         od_type='IncToDec',
         l2_leaf_reg=5,
@@ -409,6 +409,7 @@ def main(_config: dict):
 
     if _config['calculated_features']:
         datasets, new_cat_feat = create_features_for_datasets(datasets)
+        test_datasets, _ = create_features_for_datasets(test_datasets)
         _config['cat_features'] += new_cat_feat
         print(f"New cat features: {_config['cat_features']}")
 
@@ -417,8 +418,8 @@ def main(_config: dict):
 
         if _config['smote']:
             d_train = minority_class_resample(d_train,cat_feats_encoded)
-            d_val = minority_class_resample(d_val, cat_feats_encoded)
-            d_test = minority_class_resample(d_test, cat_feats_encoded)
+            #d_val = minority_class_resample(d_val, cat_feats_encoded)
+            #d_test = minority_class_resample(d_test, cat_feats_encoded)
 
         x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test)
         # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
@@ -452,12 +453,12 @@ if __name__ == '__main__':
         'normalize': False,  # normalize input values or not
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/2223_snap_4_city',
-        'test_src': 'data/24_snap_4_city',
+        'dataset_src': 'data/2223_12',
+        'test_src': 'data/24_12',
         'encode_categorical': True,
         'calculated_features': True,
         'make_synthetic': None,  # options: 'sdv', 'ydata', None
-        'smote': True,  # perhaps not needed for catboost and in case if minority : majority > 0.5
+        'smote': False,  # perhaps not needed for catboost and in case if minority : majority > 0.5
         'cat_features': ['gender', 'citizenship', 'department', 'field', 'city']  #, 'occupational_hazards']
     }
 

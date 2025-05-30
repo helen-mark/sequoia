@@ -2,29 +2,29 @@ data_location:
   data_path: 'data_raw/'
   trg_path: 'data/'
 
-#  file_name: 'seq_final.xlsx'  # check file extension
-#  output_name: 'sequoia_dataset_2223.csv'
-#data:
-#  region: 'Москва'
-#  industry: 'Light industry'  #  Metals, Light industry
+  file_name: 'seq_final.xlsx'  # check file extension
+  output_name: 'sequoia_dataset_24_12.csv'
+data:
+  region: 'Москва'
+  industry: 'Light industry'  #  Metals, Light industry
 
 #  file_name: 'SWG_final1.xlsx'  # check file extension
-#  output_name: 'swg_dataset_2223.csv'
+#  output_name: 'swg_dataset_24_12.csv'
 #data:
 #  region: 'Москва'
 #  industry: 'Light industry'  #  Metals, Light industry
 
 #  file_name: 'polimer.xlsx'  # check file extension
-#  output_name: 'polimer_dataset_24.csv'
+#  output_name: 'polimer_dataset_24_12.csv'
 #data:
 #  region: 'Оренбург'
 #  industry: 'Metals'  #  Metals, Light industry
 
-  file_name: 'Химик_final.xlsx'  # check file extension
-  output_name: 'chemistry_dataset_24.csv'
-data:
-  region: 'Москва'
-  industry: 'Metals'  #  Metals, Light industry
+#  file_name: 'Химик_final.xlsx'  # check file extension
+#  output_name: 'chemistry_dataset_24.csv'
+#data:
+#  region: 'Москва'
+#  industry: 'Metals'  #  Metals, Light industry
 
   income_calibration: 'Inflation'  # Living wage, Inflation
   remove_short_service: False
@@ -35,13 +35,13 @@ time_snapshots:
   snapshot_step: 4  # months
   snapshot_min_duration: 1
   snapshot_initial_offset: 1
-  max_snapshots_number: 3
+  max_snapshots_number: 2
   min_window: 2
   max_window: 4
   random_snapshot: False
 options:
   forecast_horison: 6  # 'left' workers turn into 'working' if observed this long before dismissal
-  remove_censored: False
+  remove_censored: True
 required_sheets:
   basic:
     name: 'Основные данные'

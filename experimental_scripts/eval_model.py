@@ -28,9 +28,8 @@ def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
 
 
 def test_model(_model: K.Model, _feat: pd.DataFrame, _trg: pd.DataFrame):
-    predictions = model.predict_proba(_feat)
-    print(predictions)
-    predictions = [int(p[1] > 0.45) for p in predictions]
+    predictions = model.predict(_feat)
+    # predictions = [int(p[1] > 0.7) for p in predictions]
 
     f1 = f1_score(_trg, predictions)
     r = recall_score(_trg, predictions)
@@ -118,8 +117,8 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
 
 if __name__ == '__main__':
     config = {
-        "test_data_path": "data/",
-        'train_data_path': 'data/2223_snap_4_city',
+        "test_data_path": "data/24_12_1",
+        'train_data_path': 'data/2223_12',
         "model_path": "model.pkl"
     }
 
@@ -144,7 +143,7 @@ if __name__ == '__main__':
 
     print("Test on each dataset separately...")
     for d in test_datasets:
-        strings_to_drop = ['long', "birth", "code", 'overtime', 'termination', 'recruit', 'index']
+        strings_to_drop = ['long', 'birth', 'code', 'overtime', 'termination', 'recruit', 'index']
         d = d.drop(
             columns=[c for c in d.columns if any(string in c for string in strings_to_drop)])
         d = d.reset_index()
@@ -161,3 +160,4 @@ if __name__ == '__main__':
             test_model(model, feat, trg)
         except Exception as e:
             print(e)
+        d.transpose().to_excel("dataset_prepared_12.xlsx")

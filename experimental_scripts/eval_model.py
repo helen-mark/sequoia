@@ -13,8 +13,9 @@ from sklearn.preprocessing import OneHotEncoder
 import pandas as pd
 import os
 import seaborn as sn
+import matplotlib
+matplotlib.use('TkAgg')  # or 'Qt5Agg', 'GTK3Agg', etc.
 import matplotlib.pyplot as plt
-
 from utils.dataset import collect_datasets
 from utils.dataset import create_features_for_datasets, add_quality_features
 
@@ -28,8 +29,8 @@ def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
 
 
 def test_model(_model: K.Model, _feat: pd.DataFrame, _trg: pd.DataFrame):
-    predictions = model.predict(_feat)
-    # predictions = [int(p[1] > 0.7) for p in predictions]
+    predictions = model.predict_proba(_feat)
+    predictions = [int(p[1] > 0.7) for p in predictions]
 
     f1 = f1_score(_trg, predictions)
     r = recall_score(_trg, predictions)
@@ -117,7 +118,7 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
 
 if __name__ == '__main__':
     config = {
-        "test_data_path": "data/24_12_1",
+        "test_data_path": "data/24_12",
         'train_data_path': 'data/2223_12',
         "model_path": "model.pkl"
     }

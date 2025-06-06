@@ -79,13 +79,13 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
     # model already initialized with latest version of optimized parameters for our dataset
     model = CatBoostClassifier(
-        iterations=500,  # default to 1000
+        iterations=1000,  # default to 1000
         learning_rate=0.1,
         od_type='IncToDec',
-        l2_leaf_reg=5,
+        l2_leaf_reg=2,
         bootstrap_type='Bayesian',
         od_wait=5,
-        depth=8,  # normally set it from 6 to 10
+        depth=10,  # normally set it from 6 to 10
         eval_metric='Accuracy',
         random_seed=42,
         sampling_frequency='PerTreeLevel',
@@ -300,9 +300,9 @@ def prepare_dataset(_dataset: pd.DataFrame, _test_split: float, _normalize: bool
 
 def show_decision_tree(_model):
     tree_ = _model.estimators_[0].tree_
-    feature_list = ["department_encoded",
-                    "department_encoded2",
-                    "department_encoded3",
+    feature_list = ["job_category_encoded",
+                    "job_category_encoded2",
+                    "job_category_encoded3",
                     "seniority_encoded",
                     "nationality_encoded",
                     "nationality_encoded2",
@@ -459,7 +459,7 @@ if __name__ == '__main__':
         'calculated_features': True,
         'make_synthetic': None,  # options: 'sdv', 'ydata', None
         'smote': False,  # perhaps not needed for catboost and in case if minority : majority > 0.5
-        'cat_features': ['gender', 'citizenship', 'department', 'field', 'city']  #, 'occupational_hazards']
+        'cat_features': ['gender', 'citizenship', 'job_category', 'field', 'city']  #, 'occupational_hazards']
     }
 
     main(config)

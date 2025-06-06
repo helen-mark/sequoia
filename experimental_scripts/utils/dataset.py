@@ -307,7 +307,7 @@ def prepare_dataset_2(_datasets: list, _test_datasets: list, _make_synthetic: bo
 def prepare_all_features(_train_ds: tf.data.Dataset):
     # Categorical features encoded as integers
     gender = K.Input(shape=(1,), name="gender", dtype="int64")
-    department = K.Input(shape=(1,), name="department", dtype="int64")
+    job_category = K.Input(shape=(1,), name="job_category", dtype="int64")
     nationality = K.Input(shape=(1,), name="citizenship", dtype="int64")
     field = K.Input(shape=(1,), name="field", dtype="int64")
     # family_status = K.Input(shape=(1,), name="family_status", dtype="int64")
@@ -337,7 +337,7 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
 
     # Integer categorical features
     gender_encoded = encode_categorical_feature(gender, "gender", _train_ds, False)
-    department_encoded = encode_categorical_feature(department, "department", _train_ds, False)
+    job_category_encoded = encode_categorical_feature(job_category, "job_category", _train_ds, False)
     nationality_encoded = encode_categorical_feature(nationality, "citizenship", _train_ds, False)
     field_encoded = encode_categorical_feature(field, "field", _train_ds, False)
     hazards_encoded = encode_categorical_feature(hazards, "occupational_hazards", _train_ds, False)
@@ -368,7 +368,7 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
 
 
     all_inputs_nonreg = [
-        department,
+        job_category,
         seniority,
         nationality,
         age,
@@ -402,7 +402,7 @@ def prepare_all_features(_train_ds: tf.data.Dataset):
 
     all_features_nonreg = K.layers.concatenate(
         [
-            department_encoded,
+            job_category_encoded,
             seniority_encoded,
             nationality_encoded,
             age_encoded,
@@ -469,8 +469,8 @@ def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
     )
     #df['region_population_group'] = pd.qcut(_total_ds['region'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'], duplicates='drop')
 
-    df['position_industry'] = df['department'].astype(str) + '_' + df['field'].astype(str)
-    # df['harm_position'] = df['occupational_hazards'].astype(str) + '_' + df['department'].astype(str)
+    df['position_industry'] = df['job_category'].astype(str) + '_' + df['field'].astype(str)
+    # df['harm_position'] = df['occupational_hazards'].astype(str) + '_' + df['job_category'].astype(str)
     # df['harm_experience'] = df['occupational_hazards'].astype(str) + '_' + df['seniority'].astype(str)
     industry_avg_income = _total_ds.groupby('field')['income_shortterm'].mean().to_dict()
     df['industry_avg_income'] = df['field'].map(industry_avg_income)
@@ -486,8 +486,8 @@ def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
         1,  # Default value when divisor is invalid
         df['income_shortterm'] / df['salary_by_city']
     )
-    position_median_income = df.groupby('department')['income_shortterm'].median().to_dict()
-    df['position_median_income'] = df['department'].map(position_median_income)
+    position_median_income = df.groupby('job_category')['income_shortterm'].median().to_dict()
+    df['position_median_income'] = df['job_category'].map(position_median_income)
     # df['age_sqr'] = df['age'] ** 2.
 
     calculated_cat_feat = ['income_group', 'position_industry', 'region_population_group']  #, 'citizenship_gender']

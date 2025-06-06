@@ -153,6 +153,6 @@ if __name__ == '__main__':
         'calculated_features': True,
         'make_synthetic': None,  # options: 'sdv', 'ydata', None
         'smote': False,  # perhaps not needed for catboost and in case if minority : majority > 0.5
-        'cat_features': ['gender', 'citizenship', 'department', 'field']  #, 'occupational_hazards']
+        'cat_features': ['gender', 'citizenship', 'department', 'field', 'city']  #, 'occupational_hazards']
     }
     main(config)

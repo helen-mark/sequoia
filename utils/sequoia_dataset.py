@@ -582,6 +582,8 @@ class SequoiaDataset:
             return int(key)
         elif f_name == 'to_work_travel_time':
             return float(key)
+        elif f_name == 'job_category':
+            return key
         elif f_name == 'department':
             return key
         elif f_name == 'n_employers':
@@ -698,8 +700,8 @@ class SequoiaDataset:
     def salary_by_city(self, _dataset: pd.DataFrame):
         salary_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='Sheet1', index_col=0)
         _dataset['salary_by_city'] = _dataset.apply(
-            lambda row: salary_df.loc[row['city'], row['department']]
-            if row['city'] in salary_df.index and row['department'] in salary_df.columns
+            lambda row: salary_df.loc[row['city'], row['job_category']]
+            if row['city'] in salary_df.index and row['job_category'] in salary_df.columns
             else 80000,
             axis=1
         )
@@ -708,8 +710,8 @@ class SequoiaDataset:
     def vacations_by_city(self, _dataset: pd.DataFrame):
         vacations_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='Sheet2', index_col=0)
         _dataset['vacations_by_city'] = _dataset.apply(
-            lambda row: vacations_df.loc[row['city'], row['department']]
-            if row['city'] in vacations_df.index and row['department'] in vacations_df.columns
+            lambda row: vacations_df.loc[row['city'], row['job_category']]
+            if row['city'] in vacations_df.index and row['job_category'] in vacations_df.columns
             else 10,
             axis=1
         )

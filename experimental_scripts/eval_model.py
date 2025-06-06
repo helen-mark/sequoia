@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from utils.dataset import collect_datasets
 from utils.dataset import create_features_for_datasets, add_quality_features
 
-CATEGORICAL_FEATURES = ['gender', 'citizenship', 'department', 'field', 'city', 'income_group', 'position_industry', 'region_population_group']
+CATEGORICAL_FEATURES = ['gender', 'citizenship', 'job_category', 'field', 'city', 'income_group', 'position_industry', 'region_population_group']
 
 def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
     encoded_features = _encoder.transform(_dataset[CATEGORICAL_FEATURES]).toarray().astype(int)
@@ -28,18 +28,20 @@ def encode_categorical(_dataset: pd.DataFrame, _encoder: OneHotEncoder):
 
 
 def test_model(_model: K.Model, _feat: pd.DataFrame, _trg: pd.DataFrame):
-    predictions = model.predict(_feat)
-    # predictions = [int(p[1] > 0.7) for p in predictions]
+    predictions = model.predict_proba(_feat)
+    predictions = [int(p[1] > 0.5) for p in predictions]
 
     f1 = f1_score(_trg, predictions)
     r = recall_score(_trg, predictions)
     p = precision_score(_trg, predictions)
 
-    print(f"F1 = {f1:.2f}, Recall = {r:.2f}, Precision = {p:.2f}")
+    print(f"--- F1 = {f1:.2f}, Recall = {r:.2f}, Precision = {p:.2f}")
     result = confusion_matrix(_trg, predictions)
 
     sn.set(font_scale=1.4)  # for label size
     sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='d')  # font size
+
+
 
     plt.show()
 
@@ -52,7 +54,7 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
             code = row['code']
             term_date = row['termination_date']
             sample = _dataset.loc[_dataset['code']==code]
-            sample = sample.drop(columns=['recruitment_date', 'termination_date', 'code', 'birth_date'])
+            sample = sample.drop(columns=['recruitment_date', 'termination_date', 'code', 'birth_date', 'department'])
             sample = sample.drop(
                 columns=[c for c in sample.columns if ('long' in c or 'external' in c or 'overtime' in c or 'index' in c)])
             sample = sample.transpose()
@@ -117,7 +119,7 @@ def test_rowwise(_model: K.Model, _dataset: pd.DataFrame):
 
 if __name__ == '__main__':
     config = {
-        "test_data_path": "data/24_12_1",
+        "test_data_path": "data/24_12",
         'train_data_path': 'data/2223_12',
         "model_path": "model.pkl"
     }
@@ -147,7 +149,6 @@ if __name__ == '__main__':
         d = d.drop(
             columns=[c for c in d.columns if any(string in c for string in strings_to_drop)])
         d = d.reset_index()
-        print(d.columns)
 
         d, cat_feature_names = encode_categorical(d, encoder)
         d = d.transpose()

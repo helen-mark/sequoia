@@ -88,7 +88,7 @@ required_sheets:
         name: 'Employer address'
       f10:
         name: 'Job title'
-        name_out: 'department'
+        name_out: 'job_category'
         kind: 'common'
       f11:
         name: 'Hire date'
@@ -131,6 +131,10 @@ required_sheets:
       f22:
         name: 'City_population'
         name_out: 'city_population'
+        kind: 'common'
+      f23:
+        name: 'Department'
+        name_out: 'department'
         kind: 'common'
 #  salary:
 #    name: 'Оплата труда'

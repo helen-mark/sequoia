@@ -3,37 +3,37 @@ data_location:
   trg_path: 'data/'
 
 #  file_name: 'seq_final.xlsx'  # check file extension
-#  output_name: 'sequoia_dataset_2223_12.csv'
+#  output_name: 'sequoia_dataset_2223.csv'
 #data:
 #  region: 'Москва'
 #  industry: 'Light industry'  #  Metals, Light industry
 
 #  file_name: 'SWG_final1.xlsx'  # check file extension
-#  output_name: 'swg_dataset_24_12.csv'
+#  output_name: 'swg_dataset_24.csv'
 #data:
 #  region: 'Москва'
-#  industry: 'Light industry'  #  Metals, Light industry
+#  industry: 'Electric'  #  Metals, Light industry
 
-  file_name: 'polimer.xlsx'  # check file extension
-  output_name: 'polimer_dataset_2223_12.csv'
-data:
-  region: 'Оренбург'
-  industry: 'Metals'  #  Metals, Light industry
-
-#  file_name: 'Химик_final.xlsx'  # check file extension
-#  output_name: 'chemistry_dataset_24.csv'
+#  file_name: 'polimer.xlsx'  # check file extension
+#  output_name: 'polimer_dataset_2223.csv'
 #data:
-#  region: 'Москва'
+#  region: 'Оренбург'
 #  industry: 'Metals'  #  Metals, Light industry
 
+#  file_name: 'химик2.xlsx'  # check file extension
+#  output_name: 'chemi_dataset_24_jun.csv'
+#data:
+#  region: 'Москва'
+#  industry: 'Chemistry'  #  Metals, Light industry
+
   income_calibration: 'Inflation'  # Living wage, Inflation
-  remove_short_service: False
+  remove_short_service: True
   date_format: '%Y.%m.%d'
-  data_load_date: '01.01.2024'
   data_begin_date: '01.01.2022'
+  data_load_date: '01.01.2024'
 time_snapshots:
-  snapshot_step: 4  # months
-  snapshot_min_duration: 1
+  snapshot_step: 3  # months
+  snapshot_min_duration: 3
   snapshot_initial_offset: 1
   max_snapshots_number: 1
   min_window: 2
@@ -72,18 +72,18 @@ required_sheets:
         name: 'Nationality'
         name_out: 'citizenship'
         kind: 'common'
-      #f6:
-      #  name: 'Education'
-      #  name_out: 'education'
-      # kind: 'common'
-#      f7:
-#        name: 'family status'
-#        name_out: 'family_status'
-#        kind: 'common'
-#      f8:
-#        name: 'kids up to 18Y'
-#        name_out: 'children'
-#        kind: 'common'
+      f6:
+        name: 'Education'
+        name_out: 'education'
+        kind: 'common'
+      f7:
+        name: 'family status'
+        name_out: 'family_status'
+        kind: 'common'
+      f8:
+        name: 'kids up to 18Y'
+        name_out: 'children'
+        kind: 'common'
       f9:
         name: 'Employer address'
       f10:
@@ -135,6 +135,18 @@ required_sheets:
       f23:
         name: 'Department'
         name_out: 'department'
+        kind: 'common'
+      f24:
+        name: 'Total seniority'
+        name_out: 'total_seniority'
+        kind: 'common'
+      f25:
+        name: 'Region'
+        name_out: 'region'
+        kind: 'common'
+      f26:
+        name: 'Industry kind'
+        name_out: 'industry_kind_internal'
         kind: 'common'
 #  salary:
 #    name: 'Оплата труда'

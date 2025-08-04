@@ -17,7 +17,7 @@ import matplotlib
 matplotlib.use('TkAgg')  # or 'Qt5Agg', 'GTK3Agg', etc.
 import matplotlib.pyplot as plt
 from utils.dataset import collect_datasets
-from utils.dataset import create_features_for_datasets, add_quality_features
+from utils.dataset import create_features_for_datasets, remove_short_service
 
 CATEGORICAL_FEATURES = ['gender', 'citizenship', 'job_category', 'field', 'city', 'income_group', 'position_industry', 'region_population_group']
 
@@ -122,7 +122,8 @@ if __name__ == '__main__':
     config = {
         "test_data_path": "data/24_12",
         'train_data_path': 'data/2223_12',
-        "model_path": "model.pkl"
+        "model_path": "model.pkl",
+        "remove_short_service": True
     }
 
     model = pickle.load(open(config["model_path"], 'rb'))
@@ -132,12 +133,14 @@ if __name__ == '__main__':
     all_datasets = datasets + train_datasets
 
     all_datasets, _ = create_features_for_datasets(all_datasets)
+    all_datasets = remove_short_service(all_datasets)
 
-    dataset_to_encode = pd.concat(train_datasets, axis=0)
+    dataset_to_encode = pd.concat(all_datasets, axis=0)
     encoder = OneHotEncoder()
     encoder.fit(dataset_to_encode[CATEGORICAL_FEATURES])
     dataset_to_encode = dataset_to_encode.reset_index()
 
+    print(n_test_datasets)
     test_datasets = all_datasets[:n_test_datasets]
     if n_test_datasets > 1:
         test_datasets.append(pd.concat(test_datasets, axis=0))
@@ -145,21 +148,28 @@ if __name__ == '__main__':
     # test_rowwise(model, dataset)
 
     print("Test on each dataset separately...")
-    for d in test_datasets:
-        strings_to_drop = ['long', 'birth', 'code', 'overtime', 'termination', 'recruit', 'index']
+    months=['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sept', 'oct', 'nov', 'dec']
+    for n, d in enumerate(test_datasets):
+        strings_to_drop = ['long', 'birth', 'overtime', 'recruit', 'index']  # , 'termination', 'code', 'department']
         d = d.drop(
             columns=[c for c in d.columns if any(string in c for string in strings_to_drop)])
         d = d.reset_index()
 
         d, cat_feature_names = encode_categorical(d, encoder)
-        d = d.transpose()
 
-        feat = d[:-1].transpose()
-        trg = d[-1:].transpose()
+        feat = d.drop(columns=['status'])
+        trg = d['status']
 
         # feat.insert(12, 'occupational_hazards_4', [0 for i in range(len(feat))])
         try:
             test_model(model, feat, trg)
         except Exception as e:
-            print(e)
-        d.transpose().to_excel("dataset_prepared_12.xlsx")
+            print('Exception testing the model', e)
+        print(n)
+        d.to_excel('data/app/' + months[n] + '24.xlsx', index=False)
+        # if os.path.exists("dataset_prepared_all.xlsx"):
+        #     writer = pd.ExcelWriter("dataset_prepared_all.xlsx", mode='a', if_sheet_exists='replace', engine='openpyxl')
+        # else:
+        #     writer = pd.ExcelWriter("dataset_prepared_all.xlsx", mode='w', engine='openpyxl')
+        # d.to_excel(writer, sheet_name=months[n], index=False)
+        # writer.close()

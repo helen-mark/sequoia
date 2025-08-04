@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy import stats
-from scipy.stats import kruskal
 from datetime import date
 from pandas import read_csv
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
@@ -33,7 +32,7 @@ from pathlib import Path
 import seaborn as sn
 import matplotlib.pyplot as plt
 
-from utils.dataset import create_features_for_datasets, collect_datasets, minority_class_resample, prepare_dataset_2, get_united_dataset, remove_short_service
+from utils.dataset_chemistry import create_features_for_datasets, collect_datasets, minority_class_resample, prepare_dataset_2, get_united_dataset, remove_short_service
 
 # industry_avg_income = df.groupby('field')['income_shortterm'].mean().to_dict()
 # df['industry_avg_income'] = df['field'].map(industry_avg_income)
@@ -84,39 +83,40 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
     # model already initialized with latest version of optimized parameters for our dataset
     model = CatBoostClassifier(
-        iterations=726,  # 400  # Fewer trees + early stopping
-        learning_rate=0.102,  # 0.08,  # Smaller steps for better generalization
-        depth=7,  # Slightly deeper but not excessive
-        l2_leaf_reg=14,  # 10,  # Stronger L2 regularization
-        bootstrap_type='MVS',
-        # bagging_temperature=1,  # Less aggressive subsampling
-        random_strength=2,  # Default randomness
-        loss_function='Logloss',
-        eval_metric='AUC',
-       # auto_class_weights='Balanced',
-        scale_pos_weight=6.9,
-        od_type='IncToDec',  # Early stopping
-        od_wait=75,  # Patience before stopping
-        silent=True
+        iterations=607,  # default to 1000
+        learning_rate=0.034,
+        od_type='Iter',
+        l2_leaf_reg=9,
+        bootstrap_type='Bayesian',
+        od_wait=70,
+        depth=7,  # normally set it from 6 to 10
+        eval_metric='BalancedAccuracy',
+        random_seed=42,
+        sampling_frequency='PerTreeLevel',
+        random_strength=3,  # default: 1
+        loss_function="Logloss",
+        #bagging_temperature=3,
+        #auto_class_weights='Balanced',
+        scale_pos_weight=2.26
     )
 
 
-    # model = CatBoostClassifier(
-    #     iterations=543,  # 400  # Fewer trees + early stopping
-    #     learning_rate=0.12,  # 0.08,  # Smaller steps for better generalization
-    #     depth=4,  # Slightly deeper but not excessive
-    #     l2_leaf_reg=9,  # 10,  # Stronger L2 regularization
-    #     bootstrap_type='MVS',
-    #     # bagging_temperature=1,  # Less aggressive subsampling
-    #     random_strength=2,  # Default randomness
-    #     loss_function='Logloss',
-    #     eval_metric='AUC',
-    #     auto_class_weights='Balanced',
-    #     # auto_class_weights='Balanced',  # Adjust for class imbalance
-    #     od_type='IncToDec',  # Early stopping
-    #     od_wait=65,  # Patience before stopping
-    #     silent=True
-    # )
+    model = CatBoostClassifier(
+        iterations=892,  # 400  # Fewer trees + early stopping
+        learning_rate=0.166,  # 0.08,  # Smaller steps for better generalization
+        depth=6,  # Slightly deeper but not excessive
+        l2_leaf_reg=12,  # 10,  # Stronger L2 regularization
+        bootstrap_type='MVS',
+        # bagging_temperature=1,  # Less aggressive subsampling
+        random_strength=1,  # Default randomness
+        loss_function='Logloss',
+        eval_metric='AUC',
+        scale_pos_weight=14.512,
+        # auto_class_weights='Balanced',  # Adjust for class imbalance
+        od_type='IncToDec',  # Early stopping
+        od_wait=31,  # Patience before stopping
+        silent=True
+    )
 
     def objective(trial):
         train_pool = Pool(_x_train, _y_train)
@@ -143,24 +143,21 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         score = balanced_accuracy_score(_y_test, y_pred)
         #score = cross_val_score(model, pd.concat([_x_train, _x_test]), pd.concat([_y_train, _y_test]), cv=3, scoring='roc_auc').mean()
         return score
-    #study = optuna.create_study(direction='maximize')
-    #study.optimize(objective, n_trials=200)
+    study = optuna.create_study(direction='maximize')
+    #study.optimize(objective, n_trials=300)
     #print(f"Best parameters of optuna: {study.best_params}")
 
     # perform feature selection
-    # selector = RFECV(
-    #     estimator=model,
-    #     step=1,
-    #     cv=3,
-    #     scoring='roc_auc'
-    # )
-    # selector.fit(_x_train, _y_train)
-    #
-    # selected_features = _x_train.columns[selector.support_]
-    #
-    # print('Selected features:')
-    # for f in list(selected_features):
-    #     print(f)
+    selector = RFECV(
+        estimator=model,
+        step=1,
+        cv=3,
+        scoring='roc_auc'
+    )
+    #selector.fit(_x_train, _y_train)
+
+    #selected_features = _x_train.columns[selector.support_]
+    #print(f'Selected features: {selected_features}')
 
     model.fit(
         _x_train,
@@ -405,50 +402,6 @@ def show_decision_tree(_model):
     recurse(0, 1)
 
 
-def stats(_test_data):
-    numeric_cols = _test_data[0].select_dtypes(include=['int64', 'float64']).columns.tolist()
-
-    # Categorical features (object, category, bool)
-    categorical_cols = _test_data[0].select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
-    for col in numeric_cols:
-        samples = [df[col].dropna() for df in _test_data]
-        try:
-            stat, pval = kruskal(*samples)
-            if pval < 0.05:
-                print(f"{col}: p-value = {pval:.4f} → SIGNIFICANT difference")
-        except Exception as e:
-            print(f"Got exception calculation kruskal for {col}")
-    from scipy.stats import chi2_contingency
-
-    for col in categorical_cols:
-        if 'city' in col:
-            continue
-        cont_table = pd.crosstab(
-            pd.concat([df[col] for df in _test_data]),
-            pd.concat([[f'df{i + 1}'] * len(df) for i, df in enumerate(_test_data)])
-        )
-        _, pval, _, _ = chi2_contingency(cont_table)
-        if pval < 0.05:
-            print(f"{col}: p-value = {pval:.4f} → SIGNIFICANT difference")
-
-    import seaborn as sns
-    df1 = _test_data[0]
-    df2 = _test_data[1]
-    df3 = _test_data[2]
-    df4 = _test_data[3]
-
-    print(len(df1), len(df2), len(df3), len(df4))
-
-    # Сравнение распределения возраста между датасетами
-    sns.boxplot(data=pd.concat([
-        df1.assign(source='Polimerstroy'),
-        df2.assign(source='Himik'),
-        df3.assign(source='MatServis&Co'),
-        df4.assign(source='SWG')
-    ]), x='source', y='income_per_experience')
-    plt.title("Распределение между датасетами")
-    plt.show()
-
 def test(_model, _test_data):
     test_data_all = pd.concat(_test_data, axis=0)
     trg = test_data_all['status']
@@ -481,14 +434,13 @@ def test(_model, _test_data):
     recall_united = recall_score(trg, predictions)
     precision_united = precision_score(trg, predictions)
     precision_united = adjusted_precision(precision_united, N_1, N_0, 1600, 8400)
-    a = balanced_accuracy_score(trg, predictions)
 
-    print(f"CatBoost result: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}, BA - {a:.2f}")
+    print(f"CatBoost result: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}")
     result = confusion_matrix(trg, predictions, normalize='true')
     sn.set(font_scale=1.4)  # for label size
     sn.heatmap(result, annot=True, annot_kws={"size": 16})  # font size
 
-    #plt.show()
+    plt.show()
     plt.clf()
 
     print("Testing separately...")
@@ -507,22 +459,21 @@ def test(_model, _test_data):
 
         # Находим порог с максимальным F1
         optimal_idx = np.argmax(f1_scores)
-        optimal_threshold = thresholds[optimal_idx]
+        optimal_threshold = 0.5  # thresholds[optimal_idx]
         predictions = (predictions[:, 1] > optimal_threshold).astype(int)
         f1 = f1_score(trg, predictions)
         r = recall_score(trg, predictions)
         p = precision_score(trg, predictions)
         p = adjusted_precision(p, N_1, N_0, 1600, 8400)
-        a = balanced_accuracy_score(trg, predictions)
 
-        print(f"test on {len(trg)} samples: thrs = {optimal_threshold}, F1={f1:.2f}, Recall={r:.2f}, Precision={p:.2f}, BA={a:.2f}")
+        print(f"test on {len(trg)} samples: thrs = {optimal_threshold}, F1={f1:.2f}, Recall={r:.2f}, Precision={p:.2f}")
 
         predicted_classes = predictions  # (np.array(predictions) > 0.5).astype(int)
         result = confusion_matrix(trg, predicted_classes, normalize='true')
         sn.set(font_scale=1.4)  # for label size
         sn.heatmap(result, annot=True, annot_kws={"size": 16})  # font size
 
-     #   plt.show()
+        # plt.show()
     plt.clf()
     return f1_united, recall_united, precision_united
 
@@ -589,8 +540,8 @@ def main(_config: dict):
     test_path = _config['test_src']
 
     # Debug:
-    #trn = pd.read_csv(data_path + '/chemi_dataset_24_jun.csv')
-    #tst = pd.read_csv(test_path + '/chemi_dataset_24_dec.csv')
+    # trn = pd.read_csv(data_path + '/chemi_dataset_24_jun.csv')
+    # tst = pd.read_csv(test_path + '/chemi_dataset_24_dec.csv')
 
     #mask = (trn['status'] == 1) & (pd.to_datetime(trn['termination_date']).dt.date >= date(year=2024, month=9, day=1))
     #rows_to_transfer = trn[mask].copy()
@@ -611,8 +562,8 @@ def main(_config: dict):
     #trn = pd.concat([trn, rows_to_transfer], ignore_index=True)
 
     # If I want to remove extra snapshots for status==0:
-    #trn = trn[~((trn['status'] == 0) & (trn['code'].str.contains('s1')))].copy()
-    #tst = tst[~((tst['status'] == 0) & (tst['code'].str.contains('s1')))].copy()
+    # trn = trn[~((trn['status'] == 0) & (trn['code'].str.contains('s1')))].copy()
+    # tst = tst[~((tst['status'] == 0) & (tst['code'].str.contains('s1')))].copy()
 
     # If I want to separate personal codes in test and train:
     #status_zero_df1 = trn[trn['status'] == 0]
@@ -624,19 +575,22 @@ def main(_config: dict):
     # mask_to_remove = (tst['status'] == 0) & (~tst['code'].isin(selected_codes))
     # tst = tst[~mask_to_remove]  # Keep rows where the mask is False
 
-    #trn.to_csv(data_path + '/chemi_dataset_24_jun.csv')
-    #tst.to_csv(test_path + '/chemi_dataset_24_dec.csv')
+    # trn.to_csv(data_path + '/chemi_dataset_24_jun.csv')
+    # tst.to_csv(test_path + '/chemi_dataset_24_dec.csv')
     # debug end
 
 
-    datasets = collect_datasets(data_path, _config['remove_small_period'])
+    datasets = collect_datasets(data_path, _config['remove_small_period'], _config['remove_invalid_deriv'])
     test_datasets = collect_datasets(test_path, _config['remove_small_period'], _config['remove_invalid_deriv'])
-
-    #concat_dataset = pd.concat(datasets + test_datasets)
-    #trn_dataset, tst_dataset = train_test_split(concat_dataset, test_size=2000, random_state=43)
-    #print(len(tst_dataset[tst_dataset['status']==1]), ' 1s in TEST')
-    #datasets = [trn_dataset]
-    #test_datasets = [tst_dataset]
+    #
+    # # take random split instead of splitting by years
+    # concat_dataset = pd.concat(datasets + test_datasets)
+    # trn_dataset, tst_dataset = train_test_split(concat_dataset, test_size=2000, random_state=43)
+    # print(len(tst_dataset[tst_dataset['status']==1]), ' 1s in TEST')
+    # datasets = [trn_dataset]
+    # test_datasets = [tst_dataset]
+    # trn_dataset.to_csv('data/rand_train_chem.csv')
+    # tst_dataset.to_csv('data/rand_test_chem.csv')
 
     rand_states = [4] # range(5)  # [777, 42, 6, 1370, 5087]
     score = [0, 0, 0]
@@ -644,12 +598,14 @@ def main(_config: dict):
     if _config['remove_short_service']:
         datasets = remove_short_service(datasets)
         test_datasets = remove_short_service(test_datasets)
+        print(1, len(test_datasets[0]))
 
     if _config['remove_outliers']:
         datasets = [df.copy().reset_index(drop=True) for df in datasets]
         test_datasets = [df.copy().reset_index(drop=True) for df in test_datasets]
         datasets = remove_outliers(datasets)
         test_datasets = remove_outliers(test_datasets)
+        print(2, len(test_datasets[0]))
 
     if _config['calculated_features']:
         datasets, new_cat_feat = create_features_for_datasets(datasets)
@@ -673,7 +629,6 @@ def main(_config: dict):
             #d_val = minority_class_resample(d_val, cat_feats_encoded)
             #d_test = minority_class_resample(d_test, cat_feats_encoded)
 
-        #d_train = [d_train[0], d_train[2], d_train[3]]
         x_train, y_train, x_val, y_val = get_united_dataset(d_train, d_val, d_test)
         # x_train, x_test, y_train, y_test = prepare_dataset(dataset, config['test_split'], config['normalize'])
 
@@ -689,7 +644,6 @@ def main(_config: dict):
 
         # print(sample_weight)
         trained_model = train(x_train, y_train, x_val, y_val, sample_weight, cat_feats_encoded, _config['model'], _config['num_iters'], _config['maximize'])
-        #stats(d_test)
         print('Run test on TRAIN set...')
         f1, r, p = test(trained_model, d_train)
         print('Run test on TEST set...')
@@ -721,15 +675,15 @@ if __name__ == '__main__':
         'remove_invalid_deriv': False,
         'num_iters': 20,  # number of fitting attempts
         'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/2223_12',
-        'test_src': 'data/24_12',
+        'dataset_src': 'data/chemistry_hh_trn',
+        'test_src': 'data/chemistry_hh_tst',
         'encode_categorical': True,
         'calculated_features': True,
         'use_selected_features': True,
         'remove_outliers': False,
         'make_synthetic': None,  # options: 'sdv', 'ydata', None
         'smote': False,  # perhaps not needed for catboost and in case if minority : majority > 0.5
-        'cat_features': ['gender', 'citizenship', 'job_category', 'city', 'field']
+        'cat_features': ['gender', 'citizenship', 'job_category', 'field', 'city', 'education', 'family_status']
     }
 
     main(config)

@@ -115,15 +115,16 @@ def collect_datasets(_data_path: str, _remove_small_period: bool = False, _remov
                     dataset = dataset[dataset[col] != -1000000]
                     print('removed wrong derivative')
 
-        strings_to_drop = ['index', 'long', 'birth', 'external_factor_', 'recruit', 'code', 'date', 'depar',  'hazards', 'Unnamed', 'internal',
-                           'deriv', 'internal', 'family', 'children', 'overtime', 'education', 'region', 'total']
+        strings_to_drop = ['long', 'birth', 'external_factor_', 'recruit', 'code', 'date', 'depar',  'hazards', 'Unnamed', 'internal', 'deriv']
+                           #'deriv', 'internal', 'family', 'children', 'overtime', 'education', 'region', 'city', 'total', 'vacations_per', 'salary_per']  #'overtime'
         dataset = dataset.drop(
             columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
         print("cols after", dataset.columns)
         dataset = shuffle(dataset)
 
-        my_list = ['инженер', 'производство', 'производство высококвалифицированное', 'управление', 'водитель', 'офис', 'сотрудник склада', 'медицинский персонал', 'логистика']
+        my_list = ['инженер', 'производство', 'производство высококвалифицированное', 'управление', 'водитель', 'офис', 'сотрудник склада', 'медицинский персонал', 'логистика']  # замените на ваш реальный список
 
+        # Функция для преобразования значений
         def transform_category(value):
             if value in my_list:
                 return value  # оставляем как есть, если в списке
@@ -131,11 +132,8 @@ def collect_datasets(_data_path: str, _remove_small_period: bool = False, _remov
                 return 'водитель'
             elif 'склад' in str(value).lower():
                 return 'сотрудник склада'
-            elif 'логист' in str(value).lower():
-                return 'логистика'
             else:
-                print(f'\n\nAttention! Invalid job category: {value}\n\n')
-                return 'Other'
+                return 'производство'
 
         # Применяем преобразование к столбцу
         dataset['job_category'] = dataset['job_category'].apply(transform_category)
@@ -319,150 +317,19 @@ def prepare_dataset_2(_datasets: list, _test_datasets: list, _make_synthetic: bo
     d_val = []
     d_train = []
     d_test = []
-    selected_feat = [
-        'status',
-    'gender_0',
-    'gender_1',
-    'citizenship_0',
-    'citizenship_1',
-    'job_category_Other',
-    'job_category_водитель',
-    'job_category_инженер',
-    'job_category_офис',
-    'job_category_производство',
-    'job_category_производство высококвалифицированное',
-    'job_category_сотрудник склада',
-    'field_0',
-    'field_1',
-    'field_2',
-    'field_3',
-    'city_KZ/N/A',
-    'city_Other',
-    'city_RU/1',
-    'city_RU/2',
-    'city_RU/5',
-    'city_RU/9',
-    'city_RU/N/A',
-    'city_Алтайский край',
-    'city_Белгородская обл.',
-    'city_Белореченск',
-    'city_Брянская обл.',
-    'city_Волгоградская обл.',
-    'city_Вологодская обл.',
-    'city_Воронеж',
-    'city_Воронежская обл.',
-    'city_Выкса',
-    'city_Донецкая народ.респ.',
-    'city_Жамбылская обл.',
-    'city_Ивановская обл.',
-    'city_Калуга',
-    'city_Карачаево-Черкесская',
-    'city_Кемеровская обл.',
-    'city_Кингисепп',
-    'city_Кировская обл.',
-    'city_Костромская обл.',
-    'city_Красноярский край',
-    'city_Липецкая обл.',
-    'city_Луганская народ.респ',
-    'city_Московская обл.',
-    'city_Мурманская обл.',
-    'city_Невинномысск',
-    'city_Нижний Новгород',
-    'city_Новгородская обл.',
-    'city_Новомосковск',
-    'city_Новосибирск',
-    'city_Омская обл.',
-    'city_Оренбургская обл.',
-    'city_Пензенская обл.',
-    'city_Пермский край',
-    'city_Псковская обл.',
-    'city_Респ. Сев. Осетия',
-    'city_Республика Адыгея',
-    'city_Республика Татарстан',
-    'city_Ростовская обл.',
-    'city_Рязанская обл.',
-    'city_Самара',
-    'city_Самарская обл.',
-    'city_Саратов',
-    'city_Смоленская обл.',
-    'city_Сочи',
-    'city_Томская обл.',
-    'city_Туркестанская обл.',
-    'city_Уфа',
-    'city_Херсонская обл.',
-    'city_Химки',
-    'city_Челябинск',
-    'city_Ямало-Ненецкий а.о.',
-    'city_Ярославская обл.',
-    'city_г. Санкт-Петербург',
-    'city_г.Севастополь',
-    'position_industry_Other_0',
-    'position_industry_водитель_3',
-    'position_industry_инженер_3',
-    'position_industry_офис_1',
-    'position_industry_производство высококвалифицированное_0',
-    'position_industry_производство высококвалифицированное_3',
-    'position_industry_производство_0',
-    'position_industry_производство_3',
-    'position_industry_сотрудник склада_3',
-    'gender_age_0_18-25',
-    'gender_age_0_26-35',
-    'gender_age_0_36-45',
-    'gender_age_0_46-55',
-    'gender_age_0_56-65',
-    'gender_age_0_nan',
-    'gender_age_1_18-25',
-    'gender_age_1_26-35',
-    'gender_age_1_36-45',
-    'gender_age_1_46-55',
-    'gender_age_1_56-65',
-    'gender_age_1_nan',
-    'income_group_high',
-    'income_group_low',
-    'income_group_medium',
-    'income_group_medium_high',
-    'income_group_medium_low',
-    'citizenship_gender_0_0',
-    'citizenship_gender_0_1',
-    'citizenship_gender_1_0',
-    'age_group_18-25',
-    'age_group_26-35',
-    'age_group_36-45',
-    'age_group_46-55',
-    'age_group_56-65',
-    'age_group_nan',
-    'absenteeism_shortterm',
-    'age',
-    'city_population',
-    'income_shortterm',
-    'seniority',
-    'vacation_days_shortterm',
-    'absences_per_experience',
-    'unused_vacation_per_experience',
-    'log_seniority',
-    'absences_per_year',
-    'income_per_experience',
-    'industry_avg_income',
-    'income_vs_industry',
-    'position_median_income',
-    'income_vs_position',
-    'age_sqr',
-    'city_population',
-    'salary_vs_city',
-    'vacations_vs_city'
-]
-    # ['status', 'education_1', 'education_2', 'education_3', 'family_status_0',
-    #    'family_status_1', 'family_status_2', 'gender_age_0_26-35',
-    #    'gender_age_0_36-45', 'gender_age_0_46-55', 'gender_age_0_56-65',
-    #    'citizenship_gender_0_0', 'citizenship_gender_0_1', 'age_group_18-25',
-    #    'age_group_26-35', 'age_group_36-45', 'age_group_46-55',
-    #    'absenteeism_shortterm', 'age', 'children', 'income_shortterm',
-    #    'overtime_shortterm', 'total_seniority', 'vacation_days_shortterm',
-    #    'absences_per_experience', 'unused_vacation_per_experience',
-    #    'log_seniority', 'absences_per_year', 'income_per_experience',
-    #    'income_vs_industry', 'position_median_income', 'income_vs_position',
-    #    'age_sqr',
-    #                  'absenteeism_deriv', 'overtime_deriv', 'vacation_days_deriv']
+    selected_feat = ['status', 'education_1', 'education_2', 'education_3', 'family_status_0',
+       'family_status_1', 'family_status_2', 'gender_age_0_26-35',
+       'gender_age_0_36-45', 'gender_age_0_46-55', 'gender_age_0_56-65',
+       'citizenship_gender_0_0', 'citizenship_gender_0_1', 'age_group_18-25',
+       'age_group_26-35', 'age_group_36-45', 'age_group_46-55',
+       'absenteeism_shortterm', 'age', 'children', 'income_shortterm',
+       'overtime_shortterm', 'total_seniority', 'vacation_days_shortterm',
+       'absences_per_experience', 'unused_vacation_per_experience',
+       'log_seniority', 'absences_per_year', 'income_per_experience',
+       'income_vs_industry', 'position_median_income', 'income_vs_position',
+       'age_sqr',
+                     'salary_by_city', 'salary_vs_city', 'vacations_by_city',
+                     'absenteeism_deriv', 'overtime_deriv', 'vacation_days_deriv']
     for dataset in _datasets + _test_datasets:
 
         n += 1
@@ -504,6 +371,8 @@ def prepare_dataset_2(_datasets: list, _test_datasets: list, _make_synthetic: bo
         # d_val.append(val)
         # d_train.append(trn)
         # d_test.append(test)
+    print(334, len(d_val[0]))
+
 
     if _make_synthetic:
         d_train[0] = pd.concat([d_train[0], sample_trn], axis=0)
@@ -677,6 +546,7 @@ def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
         include_lowest=True
     )
 
+
     if 'education' in df.columns and 'income_group' in df.columns:
         df['education_income'] = df['education'].astype(str) + '_' + df['income_group'].astype(str)
 
@@ -691,43 +561,41 @@ def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
     #
     #         df = df.drop(columns=[col])
 
-    #df['income_group'] = pd.qcut(_total_ds['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
-    quantiles = pd.qcut(_total_ds['city_population'], q=5, retbins=True, duplicates='drop')[1]
-    df['region_population_group'] = pd.cut(
-        df['city_population'],
-        bins=quantiles,
-        labels=['low', 'medium_low', 'medium', 'medium_high', 'high'][:len(quantiles)-1],
-        include_lowest=True
-    )
+    # df['income_group'] = pd.qcut(_total_ds['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
+    # quantiles = pd.qcut(_total_ds['city_population'], q=5, retbins=True, duplicates='drop')[1]
+    # df['region_population_group'] = pd.cut(
+    #     df['city_population'],
+    #     bins=quantiles,
+    #     labels=['low', 'medium_low', 'medium', 'medium_high', 'high'][:len(quantiles)-1],
+    #     include_lowest=True
+    # )
     #df['region_population_group'] = pd.qcut(_total_ds['region'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'], duplicates='drop')
 
     df['position_industry'] = df['job_category'].astype(str) + '_' + df['field'].astype(str)
-    if 'occupational_hazards' in df.columns:
-        df['harm_position'] = df['occupational_hazards'].astype(str) + '_' + df['job_category'].astype(str)
-        df['harm_experience'] = df['occupational_hazards'].astype(str) + '_' + df['seniority'].astype(str)
+    # df['harm_position'] = df['occupational_hazards'].astype(str) + '_' + df['job_category'].astype(str)
+    # df['harm_experience'] = df['occupational_hazards'].astype(str) + '_' + df['seniority'].astype(str)
     industry_avg_income = _total_ds.groupby('field')['income_shortterm'].mean().to_dict()
     df['industry_avg_income'] = df['field'].map(industry_avg_income)
     df['income_vs_industry'] = df['income_shortterm'] / df['industry_avg_income']
 
     df['salary_by_city'] = np.where(
-         df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
-         90000,  # Default value when divisor is invalid
-         df['salary_by_city']
+        df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
+        90000,  # Default value when divisor is invalid
+        df['salary_by_city']
     )
-    # df = df.drop(columns=['city_population', 'salary_by_city', 'seniority'], errors='ignore')
+    #df = df.drop(columns=['city_population', 'salary_by_city', 'seniority'], errors='ignore')
     if 'city' in df.columns:
-        df['city'] = df['city'].where(df['city'].isin(pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='Sheet2')['city'].tolist()), 'Other')
+        df['city'] = df['city'].where(df['city'].isin(['Невинномысск', 'Кингисепп', 'Белореченск', 'Новомосковск']), 'Other')
     df['salary_vs_city'] = np.where(
-         df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
-         1,  # Default value when divisor is invalid
-         df['income_shortterm'] / df['salary_by_city']
+        df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
+        1,  # Default value when divisor is invalid
+        df['income_shortterm'] / df['salary_by_city']
     )
+    df = df.drop(columns=['salary_by_city'])
     position_median_income = df.groupby('job_category')['income_shortterm'].median().to_dict()
     df['position_median_income'] = df['job_category'].map(position_median_income)
     df['income_vs_position'] = df['income_shortterm'] / df['position_median_income']
     df['age_sqr'] = df['age'] ** 2.
-    df = df.drop(columns=['salary_by_city'], errors='ignore')
-
 
     new_columns = set(df.columns) - set(original_types.index)
     # Filter for categorical (str/object) columns only

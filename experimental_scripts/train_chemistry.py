@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy import stats
+from openpyxl.drawing.image import Image
+import openpyxl
 from datetime import date
 from pandas import read_csv
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
@@ -24,6 +26,8 @@ from sklearn.model_selection import train_test_split, cross_val_score
 import optuna
 from catboost import CatBoostClassifier, Pool
 from sklearn.feature_selection import RFECV
+from io import BytesIO
+from openpyxl import Workbook
 
 
 from pathlib import Path
@@ -83,40 +87,40 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
     # model already initialized with latest version of optimized parameters for our dataset
     model = CatBoostClassifier(
-        iterations=607,  # default to 1000
-        learning_rate=0.034,
-        od_type='Iter',
-        l2_leaf_reg=9,
-        bootstrap_type='Bayesian',
-        od_wait=70,
-        depth=7,  # normally set it from 6 to 10
-        eval_metric='BalancedAccuracy',
-        random_seed=42,
-        sampling_frequency='PerTreeLevel',
-        random_strength=3,  # default: 1
-        loss_function="Logloss",
-        #bagging_temperature=3,
-        #auto_class_weights='Balanced',
-        scale_pos_weight=2.26
+        # iterations=566,  # default to 1000
+        # learning_rate=0.0254,
+        # od_type='Iter',
+        # l2_leaf_reg=8,
+        # bootstrap_type='MVS',
+        # od_wait=52,
+        depth=6,  # normally set it from 6 to 10
+        # eval_metric='BalancedAccuracy',
+        # #random_seed=42,
+        # sampling_frequency='PerTreeLevel',
+        # random_strength=1,  # default: 1
+        # loss_function="Logloss",
+        # #bagging_temperature=2,
+        # auto_class_weights='Balanced',
+        # scale_pos_weight=13
     )
 
 
-    model = CatBoostClassifier(
-        iterations=892,  # 400  # Fewer trees + early stopping
-        learning_rate=0.166,  # 0.08,  # Smaller steps for better generalization
-        depth=6,  # Slightly deeper but not excessive
-        l2_leaf_reg=12,  # 10,  # Stronger L2 regularization
-        bootstrap_type='MVS',
-        # bagging_temperature=1,  # Less aggressive subsampling
-        random_strength=1,  # Default randomness
-        loss_function='Logloss',
-        eval_metric='AUC',
-        scale_pos_weight=14.512,
-        # auto_class_weights='Balanced',  # Adjust for class imbalance
-        od_type='IncToDec',  # Early stopping
-        od_wait=31,  # Patience before stopping
-        silent=True
-    )
+    # model = CatBoostClassifier(
+    #     iterations=892,  # 400  # Fewer trees + early stopping
+    #     learning_rate=0.166,  # 0.08,  # Smaller steps for better generalization
+    #     depth=6,  # Slightly deeper but not excessive
+    #     l2_leaf_reg=12,  # 10,  # Stronger L2 regularization
+    #     bootstrap_type='MVS',
+    #     # bagging_temperature=1,  # Less aggressive subsampling
+    #     random_strength=1,  # Default randomness
+    #     loss_function='Logloss',
+    #     eval_metric='AUC',
+    #     scale_pos_weight=14.512,
+    #     # auto_class_weights='Balanced',  # Adjust for class imbalance
+    #     od_type='IncToDec',  # Early stopping
+    #     od_wait=31,  # Patience before stopping
+    #     silent=True
+    # )
 
     def objective(trial):
         train_pool = Pool(_x_train, _y_train)
@@ -143,9 +147,9 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         score = balanced_accuracy_score(_y_test, y_pred)
         #score = cross_val_score(model, pd.concat([_x_train, _x_test]), pd.concat([_y_train, _y_test]), cv=3, scoring='roc_auc').mean()
         return score
-    study = optuna.create_study(direction='maximize')
-    #study.optimize(objective, n_trials=300)
-    #print(f"Best parameters of optuna: {study.best_params}")
+    # study = optuna.create_study(direction='maximize')
+    # study.optimize(objective, n_trials=300)
+    # print(f"Best parameters of optuna: {study.best_params}")
 
     # perform feature selection
     selector = RFECV(
@@ -168,31 +172,115 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         # plot=True,
         # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
     )
+    # with open('model_chemistry_52_49_066.pkl', 'rb') as file:
+    #     model = pickle.load(file)
     train_pool = Pool(data=_x_train, label=_y_train)
     shap_values = model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
     feature_names = _x_train.columns
-    #base_value = shap_values[0, -1]  # Последний столбец для всех samples одинаков
-    #print(f"Base value (средняя вероятность класса 1): {base_value:.4f}")
-    importance = ((shap_values[:, :-1])).mean(axis=0)
-    importance_abs = (abs(shap_values[:, :-1])).mean(axis=0)
 
-    sorted_idx = np.argsort(np.abs(importance))  # Indices from highest to lowest magnitude
-    sorted_features = [feature_names[i] for i in sorted_idx]
-    sorted_shap = [importance[i] for i in sorted_idx]  # Signed values
+    # Словарь для переименования фич
+    feature_name_mapping = {
+        'salary_vs_city': 'Доход / средняя з/п в городе',
+        'age_group_46-55': 'Возрастная группа 46-55',
+        'job_category_производство': 'Категория "Работник производства"',
+        'age_sqr': 'Квадрат возраста',
+        'position_industry_управление_3': 'Категория "Управление"',
+        'age': 'Возраст',
+        'income_group_medium': 'Уровень дохода: средний',
+        'income_group_low': 'Уровень дохода: низкий',
+        'income_group_medium_high': 'Уровень дохода: средне-высокий',
+        'vacation_days_shortterm': 'Дни неотгуленного отпуска',
+        'seniority': 'Стаж в компании',
+        'income_vs_industry': 'Доход / средний доход по отрасли',
+        'income_vs_position': 'Доход / средний доход по позиции',
+        'income_per_experience': 'Доход / стаж',
+        'position_median_income': 'Медианный доход на данной позиции',
+        'income_shortterm': 'Средний доход (3 месяца)',
+        'log_seniority': 'Логарифм стажа в компании',
+        'age_group_36-45': 'Возрастная группа 36-45',
+        'total_seniority': 'Общий стаж (трудовая книжка)',
+        'absenteeism_shortterm': 'Отсутствия (3 месяца)',
+        'absences_per_experience': 'Отсутствия / общий стаж',
+        'absences_per_year': 'Отсутствия за год',
+        'job_category_производство высококвалифицированное': 'Категория "Высококвалифицированное производство"',
+        'vacations_by_city': 'Число актуальных вакансий в городе',
+        'city_Невинномысск': 'Город: Невинномысск',
+        'education_income_1_high': 'Высокий доход + высшее образование',
+        'education_income_1_medium': 'Средний доход + высшее образование',
+        'citizenship_gender_0_1': 'Женщина, российское гражданство',
+        'gender_1': 'Женский пол',
+        'city_population': 'Население города',
+        'gender_age_0_18-25': 'Мужчина, 18-25 лет',
+        'gender_age_0_26-35': 'Мужчина, 26-35 лет',
+        'age_group_18-25': 'Возраст 18-25',
+        'age_group_26-35': 'Возраст 26-35',
+        'age_group_56-65': 'Возраст 56-65',
+        'education_income_3_medium': 'Образование неизвестно, доход средний',
+        'education_income_3_medium_low': 'Образование неизвестно, доход средне-низкий',
+        'education_income_1_low': 'Низкий доход + высшее образование',
+        'education_income_2_high': 'Высокий доход + сред. спец. образование',
+        'education_income_2_low': 'Низкий доход + сред. спец. образование',
+        'education_income_2_medium': 'Средний доход + сред. спец. образование',
+        'education_income_3_low': 'Образование неизвестно, доход низкий',
+        'citizenship_gender_0_0': 'Мужчина, российское гражданство',
+        'gender_age_1_46-55': 'Женщина, 46-55 лет',
+        'gender_age_1_18-25': 'Женщина, 18-25 лет',
+        'income_group_high': 'Уровень дохода: высокий',
+        'unused_vacation_per_experience': 'Неотгуленный отпуск / стаж',
+        'children': 'число детей',
+        'education_2': 'Среднее специальное образование',
+        'education_1': 'Высшее образование'
+    }
 
-    for f, i in zip(sorted_features, sorted_shap):
-        print(f"{f}: {i}")
+    # Функция для переименования фич
+    def translate_feature_name(feature_name):
+        return feature_name_mapping.get(feature_name, feature_name)
 
-    sorted_abs_shap = [importance_abs[i] for i in sorted_idx]  # Unsigned values
-    colors = ['red' if val > 0 else 'blue' for val in sorted_shap]
-    sorted_shap = [abs(s) for s in sorted_shap]  # Signed values
-    plt.barh(sorted_features, sorted_shap, color=colors)
-    plt.title('CatBoost Feature Importance')
+    # Вычисляем важность (средние SHAP значения)
+    importance = shap_values[:, :-1].mean(axis=0)
+    importance_abs = abs(shap_values[:, :-1]).mean(axis=0)
+
+    # Сортировка для первого графика (знаковые значения)
+    sorted_idx_sign = np.argsort(np.abs(importance))  # Индексы от наименьшего к наибольшему
+    sorted_features_sign = [translate_feature_name(feature_names[i]) for i in sorted_idx_sign]
+    sorted_shap_sign = [importance[i] for i in sorted_idx_sign]
+
+    print("Feature Importance (signed values):")
+    for f, i in zip(sorted_features_sign, sorted_shap_sign):
+        print(f"{f}: {i:.6f}")
+
+    # Создаем график для знаковых значений
+    colors = ['red' if val > 0 else 'blue' for val in sorted_shap_sign]
+    plt.figure(figsize=(12, 10))
+    plt.barh(sorted_features_sign, [abs(s) for s in sorted_shap_sign], color=colors)
+    plt.title('Важность признаков CatBoost (знаковые значения)', fontsize=14)
+    plt.xlabel('Среднее абсолютное значение SHAP')
+    plt.tight_layout()
+    #plt.show()
+    plt.clf()
+
+    # Сортировка для второго графика (абсолютные значения) - топ 25
+    sorted_idx_abs = np.argsort(importance_abs)[::-1]  # Индексы от наибольшего к наименьшему
+
+    # Берем только топ 25
+    top_25_idx = sorted_idx_abs[:25]
+    top_25_features = [translate_feature_name(feature_names[i]) for i in top_25_idx]
+    top_25_abs_shap = [importance_abs[i] for i in top_25_idx]
+
+    # Создаем график для абсолютных значений (топ 25)
+    plt.figure(figsize=(12, 10))
+    plt.barh(top_25_features, top_25_abs_shap, color='skyblue')
+    plt.gca().invert_yaxis()  # Чтобы самый важный признак был сверху
+    plt.title('Топ 25 самых важных признаков (абсолютные значения)', fontsize=14)
+    plt.xlabel('Среднее абсолютное значение SHAP')
+    plt.tight_layout()
     plt.show()
     plt.clf()
-    plt.barh(sorted_features, sorted_abs_shap)
-    plt.title('Catboost Feature Importance (unsigned absolute values)')
-    plt.show()
+
+    # Дополнительно: выводим топ 25 фичей
+    print("\nТоп 25 самых важных признаков:")
+    for i, (feature, importance_val) in enumerate(zip(top_25_features, top_25_abs_shap), 1):
+        print(f"{i:2d}. {feature}: {importance_val:.6f}")
 
     return model
 
@@ -311,7 +399,7 @@ def train_random_forest_cls(_x_train, _y_train, _x_test, _y_test, _sample_weight
 
 
 
-def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _model_name, _num_iters, _maximize):
+def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _model_name, _num_iters):
     if _model_name == 'XGBoostClassifier':
         model = train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weight, _num_iters)
     elif _model_name == 'RandomForestRegressor':
@@ -402,10 +490,34 @@ def show_decision_tree(_model):
     recurse(0, 1)
 
 
+def create_shap_barchart(feature_names, shap_values, top_n=5):
+    """Create a bar chart of top N SHAP values and return as image bytes"""
+    # Get top N features by absolute SHAP value
+    shap_series = pd.Series(shap_values, index=feature_names)
+    top_shap = shap_series.abs().sort_values(ascending=False).head(top_n)
+
+    # Create the bar chart
+    fig, ax = plt.subplots(figsize=(6, 3))
+    colors = ['red' if x < 0 else 'green' for x in shap_series[top_shap.index]]
+    bars = ax.barh(range(len(top_shap)), shap_series[top_shap.index], color=colors)
+    ax.set_yticks(range(len(top_shap)))
+    ax.set_yticklabels([f"{name[:20]}..." if len(name) > 20 else name for name in top_shap.index])
+    ax.set_xlabel('SHAP Value')
+    ax.set_title('Top SHAP Features')
+    plt.tight_layout()
+
+    # Save to bytes buffer
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=80, bbox_inches='tight')
+    buf.seek(0)
+    plt.close(fig)
+
+    return buf, top_shap.index.tolist(), [shap_series[feature] for feature in top_shap.index]
+
 def test(_model, _test_data):
     test_data_all = pd.concat(_test_data, axis=0)
     trg = test_data_all['status']
-    trn = test_data_all.drop(columns=['status'])
+    feat = test_data_all.drop(columns=['status', 'code'], errors='ignore')
 
     N_1 = len([y for y in trg if y == 1])
     N_0 = len([y for y in trg if y == 0])
@@ -415,7 +527,7 @@ def test(_model, _test_data):
         denominator = numerator + (1 - P) * (new_M / M)
         return numerator / denominator
 
-    predictions = _model.predict_proba(trn)
+    predictions = _model.predict_proba(feat)
     y_proba = predictions[:, 1]
     precision, recall, thresholds = precision_recall_curve(trg, y_proba)
 
@@ -433,12 +545,13 @@ def test(_model, _test_data):
     f1_united = f1_score(trg, predictions)
     recall_united = recall_score(trg, predictions)
     precision_united = precision_score(trg, predictions)
-    precision_united = adjusted_precision(precision_united, N_1, N_0, 1600, 8400)
+    precision_united = adjusted_precision(precision_united, N_1, N_0, 1430, 8570)
+    ba = balanced_accuracy_score(trg, predictions)
 
-    print(f"CatBoost result: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}")
-    result = confusion_matrix(trg, predictions, normalize='true')
+    print(f"CatBoost result: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}, ba = {ba:.2f}")
+    result = confusion_matrix(trg, predictions)
     sn.set(font_scale=1.4)  # for label size
-    sn.heatmap(result, annot=True, annot_kws={"size": 16})  # font size
+    sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='g')  # font size
 
     plt.show()
     plt.clf()
@@ -446,7 +559,7 @@ def test(_model, _test_data):
     print("Testing separately...")
     for t in _test_data:
         trg = t['status']
-        trn = t.drop(columns=['status'])
+        trn = t.drop(columns=['status', 'code'])
         N_1 = len([y for y in trg if y == 1])
         N_0 = len([y for y in trg if y == 0])
 
@@ -469,12 +582,97 @@ def test(_model, _test_data):
         print(f"test on {len(trg)} samples: thrs = {optimal_threshold}, F1={f1:.2f}, Recall={r:.2f}, Precision={p:.2f}")
 
         predicted_classes = predictions  # (np.array(predictions) > 0.5).astype(int)
-        result = confusion_matrix(trg, predicted_classes, normalize='true')
+        result = confusion_matrix(trg, predicted_classes, )
         sn.set(font_scale=1.4)  # for label size
-        sn.heatmap(result, annot=True, annot_kws={"size": 16})  # font size
+        sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='g')  # font size
 
-        # plt.show()
+        #plt.show()
     plt.clf()
+
+    print('Apply rowwise...')
+    results = []
+    _dataset = _test_data[0]
+    # Create lists to store results
+    results = []
+
+    # Create a new Excel workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Predictions"
+
+    # Write headers - including columns for top SHAP features
+    headers = ['Code', 'Termination Date', 'Prediction Probability', 'Prediction Class']
+    shap_headers = [f'Top_{i + 1}_Feature' for i in range(5)] + [f'Top_{i + 1}_SHAP' for i in range(5)]
+    all_headers = headers + shap_headers + ['SHAP Chart']
+
+    for col_idx, header in enumerate(all_headers, 1):
+        ws.cell(row=1, column=col_idx, value=header)
+
+    row_idx = 2  # Start from row 2
+
+    for n, row in _dataset.iterrows():
+        if row['status'] == 0:
+            code = row['code']
+            if code not in pd.read_excel('himik_predictions.xlsx')['Code'].values:
+                continue
+            term_date = 11
+
+            # Create sample with the same features as batch processing
+            sample = _dataset.loc[_dataset['code'] == code]
+            feat = sample.drop(columns=['status', 'code'])
+
+            # Get prediction probability
+            pred_proba = _model.predict_proba(feat)[0, 1]
+
+            # Apply the same threshold as batch processing
+            prediction = 1 if pred_proba > optimal_threshold else 0
+
+            # Write basic data to Excel for ALL predictions
+            ws.cell(row=row_idx, column=1, value=code)
+            ws.cell(row=row_idx, column=2, value=term_date)
+            ws.cell(row=row_idx, column=3, value=pred_proba)
+            ws.cell(row=row_idx, column=4, value=prediction)
+
+            # Only create charts for predictions == 1
+            if prediction == 1:
+                # Get SHAP values
+                train_pool = Pool(data=feat, label=sample['status'])
+                shap_values = _model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
+
+                # Extract SHAP values (excluding base value)
+                shap_for_prediction = shap_values[0, :-1]
+                feature_names = feat.columns.tolist()
+
+                # Create SHAP bar chart and get top features
+                chart_buffer, top_features, top_shap_values = create_shap_barchart(feature_names, shap_for_prediction,
+                                                                                   top_n=5)
+
+                # Write top SHAP features and values
+                for i, (feature, shap_val) in enumerate(zip(top_features, top_shap_values), 1):
+                    ws.cell(row=row_idx, column=4 + i, value=feature)  # Feature name
+                    ws.cell(row=row_idx, column=4 + 5 + i, value=shap_val)  # SHAP value
+
+                # Insert SHAP bar chart
+                img = Image(chart_buffer)
+                img.anchor = f'{openpyxl.utils.get_column_letter(4 + 10 + 1)}{row_idx}'  # Column after SHAP values
+                img.width = 300
+                img.height = 150
+                ws.add_image(img)
+            else:
+                # For negative predictions, you might want to add some placeholder or explanation
+                ws.cell(row=row_idx, column=5, value="No chart - prediction = 0")
+
+            row_idx += 1  # Always increment row index
+
+    # Adjust column widths
+    for col in range(1, 20):  # Adjust first 19 columns
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 15
+
+    # Save the workbook
+    output_file = 'himik_prediction_detailed.xlsx'
+    wb.save(output_file)
+    print(f"Detailed predictions with SHAP charts saved to {output_file}")
+
     return f1_united, recall_united, precision_united
 
 def calc_weights(_y_train: pd.DataFrame, _y_val: pd.DataFrame):
@@ -582,13 +780,27 @@ def main(_config: dict):
 
     datasets = collect_datasets(data_path, _config['remove_small_period'], _config['remove_invalid_deriv'])
     test_datasets = collect_datasets(test_path, _config['remove_small_period'], _config['remove_invalid_deriv'])
-    #
-    # # take random split instead of splitting by years
-    # concat_dataset = pd.concat(datasets + test_datasets)
-    # trn_dataset, tst_dataset = train_test_split(concat_dataset, test_size=2000, random_state=43)
-    # print(len(tst_dataset[tst_dataset['status']==1]), ' 1s in TEST')
-    # datasets = [trn_dataset]
-    # test_datasets = [tst_dataset]
+    all_datasets = datasets + test_datasets
+
+    # common = pd.concat(all_datasets)
+    # new_test = common.sample(n=5000, random_state=43)
+    # new_train = common[~common.index.isin(new_test.index)]
+    # datasets = [new_train]
+    # test_datasets = [new_test]
+    # all_datasets = datasets + test_datasets
+    # new_test.to_csv('new_test_chemy.csv')
+    # new_train.to_csv('new_train_chemy.csv')
+
+    if _config['random_split']:
+        # take random split instead of splitting by years
+        concat_dataset = pd.concat(datasets + test_datasets)
+        trn_dataset, tst_dataset = train_test_split(concat_dataset, test_size=7000, random_state=43)
+    else:
+        trn_dataset = pd.concat(datasets)
+        tst_dataset = pd.concat(test_datasets)
+    print(len(tst_dataset[tst_dataset['status']==1]), ' 1s in TEST')
+    datasets = [trn_dataset.reset_index(drop=True)]
+    test_datasets = [tst_dataset.reset_index(drop=True)]
     # trn_dataset.to_csv('data/rand_train_chem.csv')
     # tst_dataset.to_csv('data/rand_test_chem.csv')
 
@@ -641,11 +853,21 @@ def main(_config: dict):
             indicator=False
         )
         print(f"\n\nNumber of duplicate rows: {len(merged)}")
+        duplicate_indices = x_train.index.isin(merged.index)
 
+        # Remove duplicates from x_train and y_train
+        x_train = x_train[~duplicate_indices]
+        y_train = y_train[~duplicate_indices]
+
+        print(f"x_train shape after removing duplicates: {x_train.shape}")
+        print(f"y_train shape after removing duplicates: {y_train.shape}")
         # print(sample_weight)
-        trained_model = train(x_train, y_train, x_val, y_val, sample_weight, cat_feats_encoded, _config['model'], _config['num_iters'], _config['maximize'])
-        print('Run test on TRAIN set...')
-        f1, r, p = test(trained_model, d_train)
+        trained_model = train(x_train.drop(columns='code', errors='ignore'), y_train, x_val.drop(columns='code', errors='ignore'), y_val, sample_weight, cat_feats_encoded, _config['model'], _config['num_iters'])
+
+        # with open('model_45_85_0441.pkl', 'rb') as file:
+        #     trained_model = pickle.load(file)
+        #print('Run test on TRAIN set...')
+        #f1, r, p = test(trained_model, d_train)
         print('Run test on TEST set...')
         f1, r, p = test(trained_model, d_test)
 
@@ -670,21 +892,22 @@ if __name__ == '__main__':
         'model': 'CatBoostClassifier',  # options: 'RandomForestRegressor', 'RandomForestRegressor_2','RandomForestClassifier', 'XGBoostClassifier', 'CatBoostClassifier'
         'test_split': 0.25,  # validation/training split proportion
         'normalize': False,  # normalize input values or not
-        'remove_short_service': True,
+        'remove_short_service': False,
         'remove_small_period': False,
         'remove_invalid_deriv': False,
         'num_iters': 20,  # number of fitting attempts
-        'maximize': 'Precision',  # metric to maximize
-        'dataset_src': 'data/chemistry_hh_trn',
-        'test_src': 'data/chemistry_hh_tst',
+        'dataset_src': 'data/chemistry_trn_full_merged_add_short_service_rnd',
+        'test_src': 'data/chemistry_tst_full_merged_add_short_service_rnd',
         'encode_categorical': True,
-        'calculated_features': True,
-        'use_selected_features': True,
+        'calculated_features': False,
+        'use_selected_features': False,
         'remove_outliers': False,
         'make_synthetic': None,  # options: 'sdv', 'ydata', None
         'smote': False,  # perhaps not needed for catboost and in case if minority : majority > 0.5
+        'random_split': False,
         'cat_features': ['gender', 'citizenship', 'job_category', 'field', 'city', 'education', 'family_status']
     }
+
 
     main(config)
 

@@ -3,42 +3,42 @@ data_location:
   trg_path: 'data/'
 
 #  file_name: 'seq_final.xlsx'  # check file extension
-#  output_name: 'sequoia_dataset_2223.csv'
+#  output_name: 'sequoia_dataset_24_add_short_service.csv'
 #data:
 #  region: 'Москва'
 #  industry: 'Light industry'  #  Metals, Light industry
 
 #  file_name: 'SWG_final1.xlsx'  # check file extension
-#  output_name: 'swg_dataset_24.csv'
+#  output_name: 'swg_dataset_22_add_short_service.csv'
 #data:
 #  region: 'Москва'
 #  industry: 'Electric'  #  Metals, Light industry
 
 #  file_name: 'polimer.xlsx'  # check file extension
-#  output_name: 'polimer_dataset_2223.csv'
+#  output_name: 'polimer_dataset_2222_add_short_service.csv'
 #data:
 #  region: 'Оренбург'
 #  industry: 'Metals'  #  Metals, Light industry
 
-#  file_name: 'химик2.xlsx'  # check file extension
-#  output_name: 'chemi_dataset_24_jun.csv'
-#data:
-#  region: 'Москва'
-#  industry: 'Chemistry'  #  Metals, Light industry
+  file_name: 'Химик_final_3y.xlsx'  # check file extension
+  output_name: 'chemi_dataset_23_add_short_service_rnd.csv'
+data:
+  region: 'Москва'
+  industry: 'Chemistry'  #  Metals, Light industry
 
   income_calibration: 'Inflation'  # Living wage, Inflation
-  remove_short_service: True
+  remove_short_service: False
   date_format: '%Y.%m.%d'
-  data_begin_date: '01.01.2022'
-  data_load_date: '01.01.2024'
+  data_begin_date: '01.01.2023'
+  data_load_date: '01.10.2024'
 time_snapshots:
   snapshot_step: 3  # months
   snapshot_min_duration: 3
-  snapshot_initial_offset: 1
-  max_snapshots_number: 1
+  snapshot_initial_offset: 1  # should ALWAYS be >=1 because employee will get smaller salary on last month if they leave in the middle of the month
+  max_snapshots_number: 2
   min_window: 2
-  max_window: 4
-  random_snapshot: False
+  max_window: 5
+  random_snapshot: True
 options:
   forecast_horison: 12  # 'left' workers turn into 'working' if observed this long before dismissal
   remove_censored: False
@@ -305,42 +305,42 @@ required_sheets:
         name: 'Ноябрь'
       f14:
         name: 'Декабрь'
-#  overtime:
-#    name: 'Сверхурочка'
-#    name_out: 'overtime'
-#    kind: 'time_series'
-#    features:
-#      f1:
-#        name: '№'
-#        type: 'int'
-#      f2:
-#        name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
-#        type: 'str'
-#      f3:
-#        name: 'Январь'
-#        type: 'str'
-#      f4:
-#        name: 'Февраль'
-#      f5:
-#        name: 'Март'
-#      f6:
-#        name: 'Апрель'
-#      f7:
-#        name: 'Май'
-#      f8:
-#        name: 'Июнь'
-#      f9:
-#        name: 'Июль'
-#      f10:
-#        name: 'Август'
-#      f11:
-#        name: 'Сентябрь'
-#      f12:
-#        name: 'Октябрь'
-#      f13:
-#        name: 'Ноябрь'
-#      f14:
-#        name: 'Декабрь'
+  overtime:
+    name: 'Сверхурочка'
+    name_out: 'overtime'
+    kind: 'time_series'
+    features:
+      f1:
+        name: '№'
+        type: 'int'
+      f2:
+        name: 'ФИО/код сотрудника'  # check they are same like on sheet 1
+        type: 'str'
+      f3:
+        name: 'Январь'
+        type: 'str'
+      f4:
+        name: 'Февраль'
+      f5:
+        name: 'Март'
+      f6:
+        name: 'Апрель'
+      f7:
+        name: 'Май'
+      f8:
+        name: 'Июнь'
+      f9:
+        name: 'Июль'
+      f10:
+        name: 'Август'
+      f11:
+        name: 'Сентябрь'
+      f12:
+        name: 'Октябрь'
+      f13:
+        name: 'Ноябрь'
+      f14:
+        name: 'Декабрь'
 #  night_hours:
 #    name: 'Количество ночных смен'
 #    name_out: 'night_hours'

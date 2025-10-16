@@ -87,21 +87,21 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
     # model already initialized with latest version of optimized parameters for our dataset
     model = CatBoostClassifier(
-        # iterations=566,  # default to 1000
+        iterations=766,  # default to 1000
         # learning_rate=0.0254,
         # od_type='Iter',
-        # l2_leaf_reg=8,
-        # bootstrap_type='MVS',
+        l2_leaf_reg=12,
+        bootstrap_type='MVS',
         # od_wait=52,
-        depth=6,  # normally set it from 6 to 10
-        # eval_metric='BalancedAccuracy',
+        depth=10,  # normally set it from 6 to 10
+        eval_metric='BalancedAccuracy',
         # #random_seed=42,
         # sampling_frequency='PerTreeLevel',
-        # random_strength=1,  # default: 1
+        random_strength=1,  # default: 1
         # loss_function="Logloss",
         # #bagging_temperature=2,
         # auto_class_weights='Balanced',
-        # scale_pos_weight=13
+        scale_pos_weight=2
     )
 
 
@@ -166,7 +166,7 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
     model.fit(
         _x_train,
         _y_train,
-        eval_set=(_x_test, _y_test),
+        #eval_set=(_x_test, _y_test),
         verbose=False,
         # sample_weight=_sample_weight,
         # plot=True,
@@ -572,14 +572,15 @@ def test(_model, _test_data):
 
         # Находим порог с максимальным F1
         optimal_idx = np.argmax(f1_scores)
-        optimal_threshold = 0.5  # thresholds[optimal_idx]
+        optimal_threshold = 0.3  # thresholds[optimal_idx]
         predictions = (predictions[:, 1] > optimal_threshold).astype(int)
         f1 = f1_score(trg, predictions)
         r = recall_score(trg, predictions)
         p = precision_score(trg, predictions)
         p = adjusted_precision(p, N_1, N_0, 1600, 8400)
+        ba = balanced_accuracy_score(trg, predictions)
 
-        print(f"test on {len(trg)} samples: thrs = {optimal_threshold}, F1={f1:.2f}, Recall={r:.2f}, Precision={p:.2f}")
+        print(f"test on {len(trg)} samples: thrs = {optimal_threshold}, F1={f1:.2f}, Recall={r:.2f}, Precision={p:.2f}, ba={ba:.2f}")
 
         predicted_classes = predictions  # (np.array(predictions) > 0.5).astype(int)
         result = confusion_matrix(trg, predicted_classes, )
@@ -590,88 +591,88 @@ def test(_model, _test_data):
     plt.clf()
 
     print('Apply rowwise...')
-    results = []
-    _dataset = _test_data[0]
-    # Create lists to store results
-    results = []
-
-    # Create a new Excel workbook
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Predictions"
-
-    # Write headers - including columns for top SHAP features
-    headers = ['Code', 'Termination Date', 'Prediction Probability', 'Prediction Class']
-    shap_headers = [f'Top_{i + 1}_Feature' for i in range(5)] + [f'Top_{i + 1}_SHAP' for i in range(5)]
-    all_headers = headers + shap_headers + ['SHAP Chart']
-
-    for col_idx, header in enumerate(all_headers, 1):
-        ws.cell(row=1, column=col_idx, value=header)
-
-    row_idx = 2  # Start from row 2
-
-    for n, row in _dataset.iterrows():
-        if row['status'] == 0:
-            code = row['code']
-            if code not in pd.read_excel('himik_predictions.xlsx')['Code'].values:
-                continue
-            term_date = 11
-
-            # Create sample with the same features as batch processing
-            sample = _dataset.loc[_dataset['code'] == code]
-            feat = sample.drop(columns=['status', 'code'])
-
-            # Get prediction probability
-            pred_proba = _model.predict_proba(feat)[0, 1]
-
-            # Apply the same threshold as batch processing
-            prediction = 1 if pred_proba > optimal_threshold else 0
-
-            # Write basic data to Excel for ALL predictions
-            ws.cell(row=row_idx, column=1, value=code)
-            ws.cell(row=row_idx, column=2, value=term_date)
-            ws.cell(row=row_idx, column=3, value=pred_proba)
-            ws.cell(row=row_idx, column=4, value=prediction)
-
-            # Only create charts for predictions == 1
-            if prediction == 1:
-                # Get SHAP values
-                train_pool = Pool(data=feat, label=sample['status'])
-                shap_values = _model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
-
-                # Extract SHAP values (excluding base value)
-                shap_for_prediction = shap_values[0, :-1]
-                feature_names = feat.columns.tolist()
-
-                # Create SHAP bar chart and get top features
-                chart_buffer, top_features, top_shap_values = create_shap_barchart(feature_names, shap_for_prediction,
-                                                                                   top_n=5)
-
-                # Write top SHAP features and values
-                for i, (feature, shap_val) in enumerate(zip(top_features, top_shap_values), 1):
-                    ws.cell(row=row_idx, column=4 + i, value=feature)  # Feature name
-                    ws.cell(row=row_idx, column=4 + 5 + i, value=shap_val)  # SHAP value
-
-                # Insert SHAP bar chart
-                img = Image(chart_buffer)
-                img.anchor = f'{openpyxl.utils.get_column_letter(4 + 10 + 1)}{row_idx}'  # Column after SHAP values
-                img.width = 300
-                img.height = 150
-                ws.add_image(img)
-            else:
-                # For negative predictions, you might want to add some placeholder or explanation
-                ws.cell(row=row_idx, column=5, value="No chart - prediction = 0")
-
-            row_idx += 1  # Always increment row index
-
-    # Adjust column widths
-    for col in range(1, 20):  # Adjust first 19 columns
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 15
-
-    # Save the workbook
-    output_file = 'himik_prediction_detailed.xlsx'
-    wb.save(output_file)
-    print(f"Detailed predictions with SHAP charts saved to {output_file}")
+    # results = []
+    # _dataset = _test_data[0]
+    # # Create lists to store results
+    # results = []
+    #
+    # # Create a new Excel workbook
+    # wb = Workbook()
+    # ws = wb.active
+    # ws.title = "Predictions"
+    #
+    # # Write headers - including columns for top SHAP features
+    # headers = ['Code', 'Termination Date', 'Prediction Probability', 'Prediction Class']
+    # shap_headers = [f'Top_{i + 1}_Feature' for i in range(5)] + [f'Top_{i + 1}_SHAP' for i in range(5)]
+    # all_headers = headers + shap_headers + ['SHAP Chart']
+    #
+    # for col_idx, header in enumerate(all_headers, 1):
+    #     ws.cell(row=1, column=col_idx, value=header)
+    #
+    # row_idx = 2  # Start from row 2
+    #
+    # for n, row in _dataset.iterrows():
+    #     if row['status'] == 0:
+    #         code = row['code']
+    #         if code not in pd.read_excel('himik_predictions.xlsx')['Code'].values:
+    #             continue
+    #         term_date = 11
+    #
+    #         # Create sample with the same features as batch processing
+    #         sample = _dataset.loc[_dataset['code'] == code]
+    #         feat = sample.drop(columns=['status', 'code'])
+    #
+    #         # Get prediction probability
+    #         pred_proba = _model.predict_proba(feat)[0, 1]
+    #
+    #         # Apply the same threshold as batch processing
+    #         prediction = 1 if pred_proba > optimal_threshold else 0
+    #
+    #         # Write basic data to Excel for ALL predictions
+    #         ws.cell(row=row_idx, column=1, value=code)
+    #         ws.cell(row=row_idx, column=2, value=term_date)
+    #         ws.cell(row=row_idx, column=3, value=pred_proba)
+    #         ws.cell(row=row_idx, column=4, value=prediction)
+    #
+    #         # Only create charts for predictions == 1
+    #         if prediction == 1:
+    #             # Get SHAP values
+    #             train_pool = Pool(data=feat, label=sample['status'])
+    #             shap_values = _model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
+    #
+    #             # Extract SHAP values (excluding base value)
+    #             shap_for_prediction = shap_values[0, :-1]
+    #             feature_names = feat.columns.tolist()
+    #
+    #             # Create SHAP bar chart and get top features
+    #             chart_buffer, top_features, top_shap_values = create_shap_barchart(feature_names, shap_for_prediction,
+    #                                                                                top_n=5)
+    #
+    #             # Write top SHAP features and values
+    #             for i, (feature, shap_val) in enumerate(zip(top_features, top_shap_values), 1):
+    #                 ws.cell(row=row_idx, column=4 + i, value=feature)  # Feature name
+    #                 ws.cell(row=row_idx, column=4 + 5 + i, value=shap_val)  # SHAP value
+    #
+    #             # Insert SHAP bar chart
+    #             img = Image(chart_buffer)
+    #             img.anchor = f'{openpyxl.utils.get_column_letter(4 + 10 + 1)}{row_idx}'  # Column after SHAP values
+    #             img.width = 300
+    #             img.height = 150
+    #             ws.add_image(img)
+    #         else:
+    #             # For negative predictions, you might want to add some placeholder or explanation
+    #             ws.cell(row=row_idx, column=5, value="No chart - prediction = 0")
+    #
+    #         row_idx += 1  # Always increment row index
+    #
+    # # Adjust column widths
+    # for col in range(1, 20):  # Adjust first 19 columns
+    #     ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 15
+    #
+    # # Save the workbook
+    # output_file = 'himik_prediction_detailed.xlsx'
+    # wb.save(output_file)
+    # print(f"Detailed predictions with SHAP charts saved to {output_file}")
 
     return f1_united, recall_united, precision_united
 
@@ -866,8 +867,8 @@ def main(_config: dict):
 
         # with open('model_45_85_0441.pkl', 'rb') as file:
         #     trained_model = pickle.load(file)
-        #print('Run test on TRAIN set...')
-        #f1, r, p = test(trained_model, d_train)
+        print('Run test on TRAIN set...')
+        f1, r, p = test(trained_model, d_train)
         print('Run test on TEST set...')
         f1, r, p = test(trained_model, d_test)
 

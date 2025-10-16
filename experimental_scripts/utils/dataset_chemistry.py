@@ -108,17 +108,23 @@ def collect_datasets(_data_path: str, _remove_small_period: bool = False, _remov
 
         if _remove_small_period:
             dataset['termination_date'] = pd.to_datetime(dataset['termination_date'])
-            dataset = dataset[~((dataset['termination_date'].dt.month <= 2) & (dataset['termination_date'].dt.year == 2024))]
+            dataset = dataset[~(((dataset['status']==1) & (dataset['termination_date'].dt.month <= 2)))]
+            dataset = dataset[~(pd.to_datetime(dataset['recruitment_date']).dt.month > 10)]
+
         if _remove_invalid_deriv:
             for col in dataset.columns:
                 if 'deriv' in col:
                     dataset = dataset[dataset[col] != -1000000]
                     print('removed wrong derivative')
 
-        strings_to_drop = ['long', 'birth', 'external_factor_', 'recruit', 'code', 'date', 'depar',  'hazards', 'Unnamed', 'internal', 'deriv']
+        strings_to_drop = ['long', 'birth', 'external_factor_', 'recruit', 'snapshot_start', 'date', 'depar',  'hazards', 'Unnamed', 'internal', 'deriv']
                            #'deriv', 'internal', 'family', 'children', 'overtime', 'education', 'region', 'city', 'total', 'vacations_per', 'salary_per']  #'overtime'
         dataset = dataset.drop(
             columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
+        # Remove rows where income_shortterm <= 0
+        dataset = dataset[dataset['income_shortterm'] > 0]
+        dataset = dataset[dataset['vacation_days_shortterm'] > 0]
+
         print("cols after", dataset.columns)
         dataset = shuffle(dataset)
 
@@ -228,17 +234,17 @@ def make_sdv(_dataset: pd.DataFrame, _size: int = 1000):
                                             })
 
     df = _dataset.copy()
-    synthesizer = CTGANSynthesizer(metadata=metadata,
-                                   epochs=100,  # Increase from default 300 if needed
-                                   batch_size=100,  # (len(df) // 4) // 10 * 10 ,  # ~25% of dataset size
-                                   generator_dim=(128, 128),  # Larger networks for complex relationships
-                                   discriminator_dim=(128, 128),
-                                   verbose=True,  # To monitor training progress
-                                   pac=5,  # Helps with mode collapse for categoricals
-                                   cuda=True
-                                   )
+    # synthesizer = CTGANSynthesizer(metadata=metadata,
+    #                                epochs=100,  # Increase from default 300 if needed
+    #                                batch_size=100,  # (len(df) // 4) // 10 * 10 ,  # ~25% of dataset size
+    #                                generator_dim=(128, 128),  # Larger networks for complex relationships
+    #                                discriminator_dim=(128, 128),
+    #                                verbose=True,  # To monitor training progress
+    #                                pac=5,  # Helps with mode collapse for categoricals
+    #                                cuda=True
+    #                                )
 
-    synthesizer = TVAESynthesizer(metadata=metadata)
+    #synthesizer = TVAESynthesizer(metadata=metadata)
     for col in df.select_dtypes(include=['category']).columns:
         df[col] = df[col].astype('object')
     synthesizer.fit(df)
@@ -328,7 +334,7 @@ def prepare_dataset_2(_datasets: list, _test_datasets: list, _make_synthetic: bo
        'log_seniority', 'absences_per_year', 'income_per_experience',
        'income_vs_industry', 'position_median_income', 'income_vs_position',
        'age_sqr',
-                     'salary_by_city', 'salary_vs_city', 'vacations_by_city',
+                     'salary_by_city', 'salary_vs_city', 'vacations_by_city', 'city_population',
                      'absenteeism_deriv', 'overtime_deriv', 'vacation_days_deriv']
     for dataset in _datasets + _test_datasets:
 
@@ -562,14 +568,14 @@ def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
     #         df = df.drop(columns=[col])
 
     # df['income_group'] = pd.qcut(_total_ds['income_shortterm'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'])
-    # quantiles = pd.qcut(_total_ds['city_population'], q=5, retbins=True, duplicates='drop')[1]
+    #quantiles = pd.qcut(_total_ds['city_population'], q=5, retbins=True, duplicates='drop')[1]
     # df['region_population_group'] = pd.cut(
     #     df['city_population'],
     #     bins=quantiles,
     #     labels=['low', 'medium_low', 'medium', 'medium_high', 'high'][:len(quantiles)-1],
     #     include_lowest=True
     # )
-    #df['region_population_group'] = pd.qcut(_total_ds['region'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'], duplicates='drop')
+    #df['region_population_group'] = pd.qcut(_total_ds['city_population'], q=5, labels=['low', 'medium_low', 'medium', 'medium_high', 'high'][:len(quantiles)-1], duplicates='drop')
 
     df['position_industry'] = df['job_category'].astype(str) + '_' + df['field'].astype(str)
     # df['harm_position'] = df['occupational_hazards'].astype(str) + '_' + df['job_category'].astype(str)
@@ -578,24 +584,28 @@ def add_quality_features(df: pd.DataFrame, _total_ds: pd.DataFrame):
     df['industry_avg_income'] = df['field'].map(industry_avg_income)
     df['income_vs_industry'] = df['income_shortterm'] / df['industry_avg_income']
 
-    df['salary_by_city'] = np.where(
-        df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
-        90000,  # Default value when divisor is invalid
-        df['salary_by_city']
-    )
+    if 'salary_by_city' in df.columns:
+        df['salary_by_city'] = np.where(
+            df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
+            90000,  # Default value when divisor is invalid
+            df['salary_by_city']
+        )
     #df = df.drop(columns=['city_population', 'salary_by_city', 'seniority'], errors='ignore')
+
+        df['salary_vs_city'] = np.where(
+            df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
+            1,  # Default value when divisor is invalid
+            df['income_shortterm'] / df['salary_by_city']
+        )
     if 'city' in df.columns:
         df['city'] = df['city'].where(df['city'].isin(['Невинномысск', 'Кингисепп', 'Белореченск', 'Новомосковск']), 'Other')
-    df['salary_vs_city'] = np.where(
-        df['salary_by_city'].isna() | (df['salary_by_city'] == 0),
-        1,  # Default value when divisor is invalid
-        df['income_shortterm'] / df['salary_by_city']
-    )
-    df = df.drop(columns=['salary_by_city'])
     position_median_income = df.groupby('job_category')['income_shortterm'].median().to_dict()
     df['position_median_income'] = df['job_category'].map(position_median_income)
     df['income_vs_position'] = df['income_shortterm'] / df['position_median_income']
     df['age_sqr'] = df['age'] ** 2.
+
+
+    df = df.drop(columns=['salary_by_city'], errors='ignore')  #, 'salary_vs_city', 'age', 'seniority'])
 
     new_columns = set(df.columns) - set(original_types.index)
     # Filter for categorical (str/object) columns only

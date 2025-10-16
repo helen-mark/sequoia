@@ -233,16 +233,16 @@ class SequoiaDataset:
 
 
         if count == 0:
-            logging.info("Found 0 valid values in time series. Performing imputation...")
-            for date, val in values_reversed.items():  # same order of columns like in xlsx table
-                if date > _recr_date and date < _term_date.replace(day=1):  # don't take first and last months of the employee! the salary is incomplete
-                    sum = update_sum(val, values_sum)
-                    if sum is None:
-                        continue
-                    values_sum = sum
-                    count += 1
-                    if count >= int(_period_months):
-                        break
+            logging.info("Found 0 valid values in time series. NOT performing imputation...")
+            # for date, val in values_reversed.items():  # same order of columns like in xlsx table
+            #     if date > _recr_date and date < _term_date.replace(day=1):  # don't take first and last months of the employee! the salary is incomplete
+            #         sum = update_sum(val, values_sum)
+            #         if sum is None:
+            #             continue
+            #         values_sum = sum
+            #         count += 1
+            #         if count >= int(_period_months):
+            #             break
 
         if count == 0:
             logging.info("Found 0 valid values in time series. Failed to impute")
@@ -354,12 +354,12 @@ class SequoiaDataset:
             recr_date = _dataset[_dataset['code']==code]['recruitment_date'].item()
             term_date = _dataset[_dataset['code']==code]['termination_date'].item()
 
-            if (_dataset[_dataset['code'] == code]['status'].item()):
-                if snapshot_timepoint.month >= _dataset[_dataset['code']==code]['termination_date'].item().month:
-                    logging.info("Critical! No snapshot offset from term date")
-                    _longterm_avg.loc[count] = [code, None]
-                    _shortterm_avg.loc[count] = [code, None]
-                    _deriv_col.loc[count] = [code, None]
+            # if (_dataset[_dataset['code'] == code]['status'].item()):
+            #     if snapshot_timepoint.month >= _dataset[_dataset['code']==code]['termination_date'].item().month:
+            #         logging.info("Critical! No snapshot offset from term date")
+            #         _longterm_avg.loc[count] = [code, None]
+            #         _shortterm_avg.loc[count] = [code, None]
+            #         _deriv_col.loc[count] = [code, None]
 
             if not sample.empty and snapshot_timepoint is not None:
                 # longterm_period = min(self.max_window, (snapshot_timepoint - start_date).days / 30)
@@ -587,7 +587,7 @@ class SequoiaDataset:
                 return None
             return self.str_to_datetime(str(key))
         elif f_name == 'status':
-            return 1 - int(key)
+            return int(key)
         elif f_name in ['age', 'seniority', 'city', 'region', 'job_category', 'department', 'industry_kind_internal']:
             return key
         elif f_name == 'city_population':
@@ -718,85 +718,78 @@ class SequoiaDataset:
         # Apply conversion
         return pd.Series(snapshot_start, index=df.index)
 
-    def collect_main_data(self, _common_features: {}, _input_df: pd.DataFrame, _data_config: dict, _snapshot: SnapShot):
+    def collect_main_data(self, _common_features: dict, _input_df: pd.DataFrame, _data_config: dict, _snapshot: SnapShot):
         snapshot_dataset = pd.DataFrame()
-        full_dataset = pd.DataFrame()
 
-        full_dataset = self.fill_common_features(_common_features, _input_df, full_dataset)
-        deleted_count = 0
 
-        _input_df['Hire date'] = pd.to_datetime(_input_df['Hire date']).dt.date
-        _input_df['Date of dismissal'] = pd.to_datetime(_input_df['Date of dismissal']).dt.date
         self.data_load_date = pd.to_datetime(self.data_load_date).date()  # Convert to Python date
 
-        for n, row in _input_df.iterrows():
-            recr_date = row['Hire date']
-            term_date = row['Date of dismissal']
-            code = row["Code"]
-            status = 1
+        # Create a working copy
+        df = _input_df.copy()
 
-            if term_date is None or str(term_date) == 'nan' or pd.isna(term_date):
-                row['Date of dismissal'] = self.data_load_date
-                term_date = self.data_load_date
-                _input_df.loc[n] = row
-                status = 0
-            if pd.isna(recr_date):
-                _input_df = _input_df.drop(axis='index', labels=n)
-                continue
+        # Handle missing termination dates
+        missing_term_mask = (df['Date of dismissal'].isna() |
+                             (df['Date of dismissal'].astype(str).str.lower() == 'nan'))
+        df.loc[missing_term_mask, 'Date of dismissal'] = self.data_load_date
+        df['Status'] = (~missing_term_mask).astype(int)  # 1 for has termination date, 0 for imputed
 
-            #recr_date = self.str_to_datetime(str(recr_date))
-            #term_date = self.str_to_datetime(str(term_date))
-            empl_period = (term_date-recr_date).days / 30.4
-            start_date = max(recr_date, self.data_begin_date)
-            end_date = min(term_date, self.data_load_date)
+        # Remove rows with missing recruitment dates
+        df = df[df['Hire date'].notna()]
 
-            # remove sample if it has no data for current time snapshot:
+        df['Hire date'] = pd.to_datetime(df['Hire date'])
+        df['Date of dismissal'] = pd.to_datetime(df['Date of dismissal'])
 
-            if self.remove_short_service:
-                if empl_period < 3:
-                    _input_df = _input_df.drop(axis='index', labels=n)
-                    deleted_count += 1
-                    continue
-                if empl_period - _snapshot.total_offset() <= _snapshot.min_duration:
-                    # print(code)  # , recr_date, term_date, f"({int(empl_period)} months)")
-                    _input_df = _input_df.drop(axis='index', labels=n)
-                    deleted_count += 1
-                    continue
-                elif (term_date - self.data_begin_date).days / 30 - _snapshot.num * _snapshot.step <= _snapshot.min_duration:
-                    _input_df = _input_df.drop(axis='index', labels=n)
-                    deleted_count += 1
-                    continue
+        # Calculate employment metrics
+        df['empl_period'] = (df['Date of dismissal'] - df['Hire date']).dt.days / 30.4
 
-            # cut out employees with employment beyond chosen data period:
-            if recr_date >= self.data_load_date or term_date < self.data_begin_date:
-                _input_df = _input_df.drop(axis='index', labels=n)
-                deleted_count += 1
-            elif _snapshot.num > 0 and (end_date - start_date).days / 30 <= _snapshot.total_offset():  # employment doesn't belong to this snapshot
-                _input_df = _input_df.drop(axis='index', labels=n)
-                deleted_count += 1
-            elif self.remove_censored and status == 0 and _snapshot.total_offset() < self.forecast_horison:  # removing censored data
-                _input_df = _input_df.drop(axis='index', labels=n)
-                deleted_count += 1
+        df['Hire date'] = df['Hire date'].dt.date
+        df['Date of dismissal'] = df['Date of dismissal'].dt.date
+
+        df['start_date'] = pd.to_datetime(np.maximum(df['Hire date'], self.data_begin_date))
+        df['end_date'] = pd.to_datetime(np.minimum(df['Date of dismissal'], self.data_load_date))
+        df['max_snapshot_duration'] = (df['end_date'] - df['start_date']).dt.days / 30.4
+
+        # Create filter masks
+        filter_mask = pd.Series(True, index=df.index)
+
+        if self.remove_short_service:
+            filter_mask &= (df['empl_period'] >= 3)
+            filter_mask &= (df['empl_period'] - _snapshot.total_offset() > _snapshot.min_duration)
+            filter_mask &= ((df['Date of dismissal'] - self.data_begin_date).dt.days / 30.4 -
+                            _snapshot.num * _snapshot.step > _snapshot.min_duration)
+
+        filter_mask &= (df['Hire date'] < self.data_load_date)
+        filter_mask &= (df['Date of dismissal'] >= self.data_begin_date)
+
+        if _snapshot.num > 0 and not self.random_snapshot:
+            filter_mask &= (df['max_snapshot_duration'] > _snapshot.total_offset())
+
+        if self.remove_censored:
+            filter_mask &= ~((df['Status'] == 0) & (_snapshot.total_offset() < self.forecast_horison))
+
+        # Apply final filter
+        deleted_count = len(df) - filter_mask.sum()
+        df = df[filter_mask].drop(columns=['empl_period', 'start_date', 'end_date', 'max_snapshot_duration'])
 
 
         logging.info(f"Attention! {deleted_count} rows removed because of short OR not actual working period")
 
-        if _input_df.empty:
+        if df.empty:
             snapshot_dataset = None
         else:
-            snapshot_dataset = self.fill_common_features(_common_features, _input_df, snapshot_dataset)
+            snapshot_dataset = self.fill_common_features(_common_features, df, snapshot_dataset)
             # if _snapshot.num > 0:
             #     snapshot_dataset['status'] = [0 for i in range(len(snapshot_dataset['status']))]
             #     full_dataset['status'] = [0 for i in range(len(full_dataset['status']))]
 
-            if True or 'status' not in snapshot_dataset.columns:  # client didn't provide status info
-                snapshot_dataset = self.fill_status(snapshot_dataset)
+            # if True or 'status' not in snapshot_dataset.columns:  # client didn't provide status info
+            #     snapshot_dataset = self.fill_status(snapshot_dataset)
             if 'age' not in snapshot_dataset.columns:  # client didn't provide age info
                 snapshot_dataset = self.age_from_birth_date(snapshot_dataset)
             if True or 'seniority' not in snapshot_dataset.columns:  # client didn't provide company seniority info
                 snapshot_dataset = self.seniority_from_term_date(snapshot_dataset)
 
-            snapshot_dataset['total_seniority'] = snapshot_dataset['seniority']
+            # snapshot_dataset['total_seniority'] = snapshot_dataset['seniority']
 
             snapshot_dataset['start_date'] = np.maximum(snapshot_dataset['recruitment_date'], self.data_begin_date)
             snapshot_dataset['end_date'] = np.minimum(snapshot_dataset['termination_date'], self.data_load_date)
@@ -805,12 +798,12 @@ class SequoiaDataset:
             # Convert to datetime64 for the calculation
             snapshot_dataset['status'] = np.where(
                 (pd.to_datetime(snapshot_dataset['termination_date']) -
-                 pd.to_datetime(snapshot_dataset['snapshot_start'])).dt.days / 30 > self.forecast_horison,
+                 pd.to_datetime(snapshot_dataset['snapshot_start'])).dt.days / 30.4 > self.forecast_horison,
                 0,
                 snapshot_dataset['status']
             )
 
-        return snapshot_dataset, full_dataset
+        return snapshot_dataset
 
 
     def salary_by_city(self, _dataset: pd.DataFrame):
@@ -898,7 +891,7 @@ class SequoiaDataset:
         for n, row in _dataset.iterrows():
             if row.isnull().values.any():
                 nan_rows_n += 1
-                #_dataset = _dataset.drop(index=n)
+                _dataset = _dataset.drop(index=n)
 
         if nan_rows_n > 0:
             logging.info(f"{nan_rows_n} rows containing NaN values in snapshot dataset")
@@ -919,7 +912,7 @@ class SequoiaDataset:
         united_dataset = pd.DataFrame()
         while True:
             logging.info(f'Starting snapshot {snapshot.num}')
-            main_dataset, _ = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
+            main_dataset = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
             if main_dataset is None:
                 logging.info(f'No data left for snapshot {snapshot.num}. Finishing process...')
                 break

@@ -21,7 +21,7 @@ data_location:
 #  industry: 'Metals'  #  Metals, Light industry
 
   file_name: 'Химик_final_3y.xlsx'  # check file extension
-  output_name: 'chemi_dataset_23_add_short_service_rnd.csv'
+  output_name: 'chemi_dataset_24_add_short_service_rnd_april.csv'
 data:
   region: 'Москва'
   industry: 'Chemistry'  #  Metals, Light industry
@@ -29,16 +29,16 @@ data:
   income_calibration: 'Inflation'  # Living wage, Inflation
   remove_short_service: False
   date_format: '%Y.%m.%d'
-  data_begin_date: '01.01.2023'
-  data_load_date: '01.10.2024'
+  data_begin_date: '01.01.2024'
+  data_load_date: '01.04.2024'
 time_snapshots:
   snapshot_step: 3  # months
   snapshot_min_duration: 3
   snapshot_initial_offset: 1  # should ALWAYS be >=1 because employee will get smaller salary on last month if they leave in the middle of the month
-  max_snapshots_number: 2
+  max_snapshots_number: 1
   min_window: 2
   max_window: 5
-  random_snapshot: True
+  random_snapshot: False
 options:
   forecast_horison: 12  # 'left' workers turn into 'working' if observed this long before dismissal
   remove_censored: False

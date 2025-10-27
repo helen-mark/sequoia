@@ -561,25 +561,22 @@ class SequoiaDataset:
             result.append(factor_col)
         return result
 
-
     def process_continuous_features(self, _dataset: pd.DataFrame, _snapshot: SnapShot, _feature_name: str):
-        # feature_col = pd.DataFrame({'code': [], self.continuous_features_names_mapping[_feature_name]: []})
-        count = 0
         logging.info(f'Processing continuous feature: {_feature_name}')
-        for n, row in _dataset.iterrows():
-            code = row['code']
-            person_termination_date = _dataset[_dataset['code']==code]['termination_date'].item()
-            snapshot_timepoint = _dataset[_dataset['code']==code]['snapshot_start'].item()
-            value = _dataset.loc[_dataset['code'] == code][_feature_name]
-            value = value.replace(',', '.', regex=True).astype(float).item()
-            value = abs(value)  # there are negative company seniority values in the data
-            value -= (person_termination_date - snapshot_timepoint).days / 365
-            # feature_col.loc[count] = [code, value]
-            row[_feature_name] = value
-            count += 1
-            _dataset.loc[n] = row
 
-        return
+        dataset = _dataset.copy()
+
+        # Convert string values to float (handling commas as decimals)
+        dataset[_feature_name] = dataset[_feature_name].str.replace(',', '.', regex=True).astype(float)
+
+        dataset[_feature_name] = dataset[_feature_name].abs()
+
+        days_diff = (dataset['termination_date'] - dataset['snapshot_start']).dt.days
+        years_diff = days_diff / 365
+
+        dataset[_feature_name] = dataset[_feature_name] - years_diff
+
+        return dataset
 
 
     def fill_snapshot_specific(self, _specific_features: list, _input_file: os.path, _dataset: pd.DataFrame, _snapshot: SnapShot):
@@ -594,7 +591,7 @@ class SequoiaDataset:
         # age, overall experience, company seniority:
         for feature_name in ['age', 'seniority', 'total_seniority']:  # , 'overall_experience']:
             if feature_name in _dataset.columns:
-                self.process_continuous_features(_dataset, _snapshot, feature_name)
+                _dataset = self.process_continuous_features(_dataset, _snapshot, feature_name)
 
         # ie = IrregularEvents(_input_file, 'days_since_promotion', 'Дата повышения', 'event_list')
         # snapshot_columns.extend([self.calc_time_since_events(ie, _dataset, _snapshot)])

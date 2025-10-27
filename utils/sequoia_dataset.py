@@ -207,7 +207,13 @@ class SequoiaDataset:
         tot = 0
         values = [x for x in values_reversed.values[0] if str(x).lower() != 'nan']
 
-        def update_sum(val, sum, not_full_month, recr_day):
+        # Helper function to get last day of month
+        def get_last_day_of_month(date):
+            if date.month == 12:
+                return date.replace(year=date.year + 1, month=1, day=1) - timedelta(days=1)
+            return date.replace(month=date.month + 1, day=1) - timedelta(days=1)
+
+        def update_sum(val, sum, not_full_month, not_full_last_month, recr_day, term_day, days_in_month):
             val = val.item()
             if val is None or val == np.nan or str(val).lower() == 'nan':
                 return None
@@ -216,26 +222,57 @@ class SequoiaDataset:
             val_corr = val_item[0] + val_item[1] if len(val_item) > 1 else val_item[0]
             val_corr = float(val_corr.replace(',', '.'))
             # print("Val corr:", val_corr)
-            if not_full_month:  # approximate the value for full month
+            # Handle case where it's both first AND last month (very short employment)
+            if not_full_month and not_full_last_month:
+                # Employee worked only from recr_day to term_day in the same month
+                days_worked = term_day - recr_day + 1  # +1 to include both start and end days
+                if days_worked > 0:
+                    print(
+                        f' Short employment: {days_worked} days worked. Approximated {val_corr} by {val_corr * days_in_month / days_worked}')
+                    val_corr = val_corr * days_in_month / days_worked
+                else:
+                    print(f' Warning: Negative or zero days worked: recr_day={recr_day}, term_day={term_day}')
+
+            # Handle partial first month only (recruitment)
+            elif not_full_month:
                 if recr_day != 1:
-                    print(f' {recr_day} Approximated {val_corr} by {val_corr * 31 / (32 - recr_day)}')
-                    val_corr = val_corr * 31 / (32 - recr_day)
+                    # Employee worked from recr_day to end of month
+                    days_worked = days_in_month - recr_day + 1
+                    print(
+                        f' First month: {days_worked} days worked. Approximated {val_corr} by {val_corr * days_in_month / days_worked}')
+                    val_corr = val_corr * days_in_month / days_worked
+
+            # Handle partial last month only (termination)
+            elif not_full_last_month:
+                if term_day != days_in_month:
+                    # Employee worked from 1st to term_day
+                    days_worked = term_day  # from day 1 to term_day inclusive
+                    print(
+                        f' Last month: {days_worked} days worked. Approximated {val_corr} by {val_corr * days_in_month / days_worked}')
+                    val_corr = val_corr * days_in_month / days_worked
+
             sum += val_corr
             return sum
 
         # avg_val = np.ma.average(values)
         for date, val in values_reversed.items():  # same order of columns like in xlsx table
             #print(f'date:{date}, snapshot:{_snapshot_timepoint}, recr: {_recr_date}, term: {_term_date}')
-            if date <= _snapshot_timepoint and date >= _recr_date.replace(day=1) and date < _term_date.replace(day=1):  # don't take the last months of the employee! the salary is incomplete
+            if date <= _snapshot_timepoint and date >= _recr_date.replace(day=1) and date <= _term_date.replace(day=1):  # don't take the last months of the employee! the salary is incomplete
                 not_full_month = date == _recr_date.replace(day=1)
+                not_full_last_month = date == _term_date.replace(day=1)
+
                 #print(f'not full month: {not_full_month}')
                 tot += 1
                 #print(f'tot={tot}, period={_period_months}')
                 if tot > int(_period_months):
                     #print('break')
                     break
+
+                days_in_month = get_last_day_of_month(date).day
+
                 #print(f'day: {_recr_date.day}')
-                sum = update_sum(val, values_sum, not_full_month, _recr_date.day)
+                sum = update_sum(val, values_sum, not_full_month, not_full_last_month, _recr_date.day, _term_date.day,
+                                 days_in_month)
                 if sum is None:
                     continue
                 values_sum = sum
@@ -376,7 +413,7 @@ class SequoiaDataset:
             recr_d = recr_dates[i]
 
             # Calculate past timepoint (3 months back)
-            past_tp = self.subtract_months(snapshot_tp, 3)
+            past_tp = self.subtract_months(snapshot_tp, self.max_window - self.min_window)
 
             # Calculate minimum past date. We allow going past start_d, but not past recr_d
             min_past_date = self.add_days(recr_d, int(_snapshot.min_duration * 30.4))
@@ -888,7 +925,7 @@ class SequoiaDataset:
 
     def salary_by_city(self, _dataset: pd.DataFrame):
         logging.info('Adding salary data from HeadHunter...')
-        salary_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='Sheet1', index_col=0)
+        salary_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='average_salary', index_col=0)
         _dataset['salary_by_city'] = _dataset.apply(
             lambda row: salary_df.loc[row['city'], row['job_category']]
             if row['city'] in salary_df.index and row['job_category'] in salary_df.columns
@@ -899,7 +936,7 @@ class SequoiaDataset:
 
     def vacations_by_city(self, _dataset: pd.DataFrame):
         logging.info('Adding vacations data from HeadHunter...')
-        vacations_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='Sheet2', index_col=0)
+        vacations_df = pd.read_excel('data_raw/salary_by_cities.xlsx', sheet_name='total_vacancies', index_col=0)
         _dataset['vacations_by_city'] = _dataset.apply(
             lambda row: vacations_df.loc[row['city'], row['job_category']]
             if row['city'] in vacations_df.index and row['job_category'] in vacations_df.columns
@@ -957,24 +994,25 @@ class SequoiaDataset:
             for col in _dataset.columns:
                 if 'income' in col or 'salary' in col:  # money related features
                     time_point = _dataset[_dataset['code']==code]['snapshot_start'].item()
-                    if self.calibrate_by == 'Inflation':
+                    if self.calibrate_by == 'Inflation' and not pd.isna(row[col]):
                         income_corrected = self.calibrate_by_inflation(row[col], time_point, rate)
-                    elif self.calibrate_by == 'Living wage':
+                    elif self.calibrate_by == 'Living wage' and not pd.isna(row[col]):
                         income_corrected = self.calibrate_by_living_wage(row[col], time_point, gold_rate)
                     row[col] = income_corrected
             _dataset.loc[n] = row
         return _dataset
 
-
     def check_nan_values(self, _dataset: pd.DataFrame):
-        nan_rows_n = 0
-        for n, row in _dataset.iterrows():
-            if row.isnull().values.any():
-                nan_rows_n += 1
-                _dataset = _dataset.drop(index=n)
+        nan_counts = _dataset.isnull().sum()
+        total_nan_rows = (_dataset.isnull().any(axis=1)).sum()
 
-        if nan_rows_n > 0:
-            logging.info(f"{nan_rows_n} rows containing NaN values in snapshot dataset")
+        if total_nan_rows > 0:
+            logging.info(f"{total_nan_rows} rows containing NaN values in snapshot dataset")
+            # Log detailed NaN counts per column
+            for col, count in nan_counts.items():
+                if count > 0:
+                    logging.debug(f"Column '{col}': {count} NaN values")
+
         return _dataset
 
     def run(self):

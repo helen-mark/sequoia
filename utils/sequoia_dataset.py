@@ -24,7 +24,7 @@ class SnapShot:
     def __init__(self, _dur: int, _min_dur: int, _initial_offset: int, _snapshot_num: int):
         self.step = _dur  # amount of days
         self.min_duration = _min_dur
-        self.initial_offset = _initial_offset  # amount of days
+        self.initial_offset = _initial_offset
         self.num = _snapshot_num
 
     def total_offset(self):
@@ -200,14 +200,14 @@ class SequoiaDataset:
 
     def calc_numerical_average(self, _values_per_month: pd.DataFrame, _period_months: int, _snapshot_timepoint: datetime.date, _recr_date: datetime.date, _term_date: datetime.date):
         assert not _values_per_month.empty
-        # assert _period_months > 0
+        assert _period_months > 0
         values_reversed = _values_per_month[_values_per_month.columns[::-1]]  # this operation reverses order of columns
         values_sum = 0.
         count = 0
         tot = 0
         values = [x for x in values_reversed.values[0] if str(x).lower() != 'nan']
 
-        def update_sum(val, sum):
+        def update_sum(val, sum, not_full_month, recr_day):
             val = val.item()
             if val is None or val == np.nan or str(val).lower() == 'nan':
                 return None
@@ -216,16 +216,26 @@ class SequoiaDataset:
             val_corr = val_item[0] + val_item[1] if len(val_item) > 1 else val_item[0]
             val_corr = float(val_corr.replace(',', '.'))
             # print("Val corr:", val_corr)
+            if not_full_month:  # approximate the value for full month
+                if recr_day != 1:
+                    print(f' {recr_day} Approximated {val_corr} by {val_corr * 31 / (32 - recr_day)}')
+                    val_corr = val_corr * 31 / (32 - recr_day)
             sum += val_corr
             return sum
 
         # avg_val = np.ma.average(values)
         for date, val in values_reversed.items():  # same order of columns like in xlsx table
-            if date <= _snapshot_timepoint and date > _recr_date and date < _term_date.replace(day=1):  # don't take first and last months of the employee! the salary is incomplete
+            #print(f'date:{date}, snapshot:{_snapshot_timepoint}, recr: {_recr_date}, term: {_term_date}')
+            if date <= _snapshot_timepoint and date >= _recr_date.replace(day=1) and date < _term_date.replace(day=1):  # don't take the last months of the employee! the salary is incomplete
+                not_full_month = date == _recr_date.replace(day=1)
+                #print(f'not full month: {not_full_month}')
                 tot += 1
+                #print(f'tot={tot}, period={_period_months}')
                 if tot > int(_period_months):
+                    #print('break')
                     break
-                sum = update_sum(val, values_sum)
+                #print(f'day: {_recr_date.day}')
+                sum = update_sum(val, values_sum, not_full_month, _recr_date.day)
                 if sum is None:
                     continue
                 values_sum = sum
@@ -330,71 +340,140 @@ class SequoiaDataset:
             return date(int(splt[0]), int(splt[1]), int(splt[2]))  # european order
         return date(int(splt[2]), int(splt[1]), int(splt[0][:2]))  # russian order
 
-    def prepare_sample(self, _feature_df: pd.DataFrame, _dataset: pd.DataFrame, _snapshot: SnapShot, _code: int):
-        sample = _feature_df.loc[_feature_df['code'] == _code]
-        if sample.empty:
-            print(f"Empty sample in function prepare_sample for {_snapshot.num} snapshot: {_code}")
-            # logging.info(f"Code {_code} is not present in feature dataframe! Empty sample")
-        sample = sample.drop(columns='code')  # leave ony columns with salary values
-        # person_recruitment_date = _dataset.loc[_dataset['code'] == _code]['recruitment_date'].item()
-        # person_termination_date = _dataset.loc[_dataset['code'] == _code]['termination_date'].item()
-        #
-        # snapshot_start = self.calc_individual_snapshot_start(_snapshot, person_recruitment_date,
-        #                                                      person_termination_date)
-        return sample  # , snapshot_start, person_recruitment_date, person_termination_date
+    def extract_features_from_timeseries(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame,
+                                                    _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame,
+                                                    _deriv_col: pd.DataFrame, _snapshot: SnapShot, _feature_name: str):
 
-    def extract_features_from_timeseries(self, _dataset: pd.DataFrame, _feature_df: pd.DataFrame, _longterm_avg: pd.DataFrame, _shortterm_avg: pd.DataFrame, _deriv_col: pd.DataFrame, _snapshot: SnapShot):
-        count = 0
+        # Merge feature data with dataset in one go
+        merged_data = _dataset.merge(_feature_df, on='code', how='left', suffixes=('', '_feature'))
 
-        for code in _dataset['code']:
-            sample = self.prepare_sample(_feature_df, _dataset, _snapshot, code)
-            snapshot_timepoint = _dataset[_dataset['code']==code]['snapshot_start'].item()
-            start_date = _dataset[_dataset['code']==code]['start_date'].item()
-            end_date = _dataset[_dataset['code']==code]['end_date'].item()
-            recr_date = _dataset[_dataset['code']==code]['recruitment_date'].item()
-            term_date = _dataset[_dataset['code']==code]['termination_date'].item()
+        # Convert ALL date columns to datetime.date to ensure consistency
+        date_columns = ['snapshot_start', 'start_date', 'recruitment_date', 'termination_date']
+        for col in date_columns:
+            merged_data[col] = pd.to_datetime(merged_data[col]).dt.date
 
-            # if (_dataset[_dataset['code'] == code]['status'].item()):
-            #     if snapshot_timepoint.month >= _dataset[_dataset['code']==code]['termination_date'].item().month:
-            #         logging.info("Critical! No snapshot offset from term date")
-            #         _longterm_avg.loc[count] = [code, None]
-            #         _shortterm_avg.loc[count] = [code, None]
-            #         _deriv_col.loc[count] = [code, None]
+        # Vectorized calculations for all codes at once
+        codes = merged_data['code'].values
+        snapshot_timepoints = merged_data['snapshot_start'].values
+        start_dates = merged_data['start_date'].values
+        recr_dates = merged_data['recruitment_date'].values
+        term_dates = merged_data['termination_date'].values
+        #print(f'start dates: {start_dates}')
+        # Calculate shortterm periods vectorized
+        def months_between_dates(start_date, end_date):
+            """Calculate number of calendar months between two dates (inclusive counting)"""
+            return (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) + 1
 
-            if not sample.empty and snapshot_timepoint is not None:
-                # longterm_period = min(self.max_window, (snapshot_timepoint - start_date).days / 30)
-                shortterm_period = min(self.min_window, (snapshot_timepoint - start_date).days / 30.4)
-                avg_now = self.calc_numerical_average(sample, shortterm_period, snapshot_timepoint, recr_date, term_date)
+        months_from_start = np.array([months_between_dates(sd, st) for st, sd in zip(snapshot_timepoints, start_dates)])
+        shortterm_periods = np.minimum(self.min_window, months_from_start)
+        #print(f'periods: {shortterm_periods}')
 
-                past_timepoint = snapshot_timepoint - relativedelta(months=3)  # 3 months is how long to the past we want to move
-                past_timepoint = max(past_timepoint, start_date + timedelta(days=_snapshot.min_duration * 30.4))
-                dt = (snapshot_timepoint - past_timepoint).days / 365.  # Time delta in years
-                avg_past = self.calc_numerical_average(sample, shortterm_period, past_timepoint, recr_date, term_date)
-                # if avg_now == 0:
-                #     print('status', _dataset[_dataset['code'] == code]['status'].item())
-                if avg_now is None or avg_past is None:
-                    print(f"Numerical average for {code} is None")
+        # Calculate past_timepoints using datetime.date operations
+        past_timepoints = []
+        for i in range(len(codes)):
+            snapshot_tp = snapshot_timepoints[i]
+            start_d = start_dates[i]
+            recr_d = recr_dates[i]
+
+            # Calculate past timepoint (3 months back)
+            past_tp = self.subtract_months(snapshot_tp, 3)
+
+            # Calculate minimum past date. We allow going past start_d, but not past recr_d
+            min_past_date = self.add_days(recr_d, int(_snapshot.min_duration * 30.4))
+
+            # Ensure past_timepoint doesn't go before start_date + min_duration
+            past_tp = max(past_tp, min_past_date)
+            past_timepoints.append(past_tp)
+
+        past_timepoints = np.array(past_timepoints)
+
+        # Calculate time delta in years
+        dts = np.array([(st - pt).days / 365.0 for st, pt in zip(snapshot_timepoints, past_timepoints)])
+
+        # Prepare results arrays
+        avg_now_arr = np.full(len(codes), None, dtype=object)
+        avg_past_arr = np.full(len(codes), None, dtype=object)
+        deriv_arr = np.full(len(codes), None, dtype=object)
+
+        codes_with_none_average = []
+        codes_with_empty_sample = []
+        # Process each sample
+        for i, code in enumerate(codes):
+            # Extract sample data (salary columns)
+            sample = _feature_df.loc[_feature_df['code'] == code]
+            if not sample.empty:
+                sample = sample.drop(columns='code')  # leave only columns with salary values
+
+            if not sample.empty and snapshot_timepoints[i] is not None:
+                # Calculate averages - pass datetime.date objects
+                avg_now = self.calc_numerical_average(
+                    sample, shortterm_periods[i], snapshot_timepoints[i],
+                    recr_dates[i], term_dates[i]
+                )
+                avg_past = self.calc_numerical_average(
+                    sample, shortterm_periods[i], past_timepoints[i],
+                    recr_dates[i], term_dates[i]
+                )
+
+                # Calculate derivative
+                if avg_now is None:
+                    codes_with_none_average.append(code)
+
+                if avg_past is None or avg_now is None:
                     deriv = None
-                elif dt > 0 or dt >= 1. / 4.:  # we have at least 3 months to calculate derivative
+                elif dts[i] >= 1. / 4.:  # we have at least 3 months to calculate derivative
                     deriv = (avg_now - avg_past)
                 else:
-                   # print('--------------------------- dt <=0 ! ', past_timepoint, start_date, preset.get())
-                    deriv = -1000000  # consider time period too small
+                    deriv = 0  # consider time period too small
 
-
-                _longterm_avg.loc[count] = [code, avg_past]
-                _shortterm_avg.loc[count] = [code, avg_now]
-                _deriv_col.loc[count] = [code, deriv]
+                avg_now_arr[i] = avg_now
+                avg_past_arr[i] = avg_past
+                deriv_arr[i] = deriv
             else:
-                _longterm_avg.loc[count] = [code, None]
-                _shortterm_avg.loc[count] = [code, None]
-                _deriv_col.loc[count] = [code, None]
+                if sample.empty:
+                    codes_with_empty_sample.append(code)
 
-            count += 1
-        # deriv_col = pd.DataFrame({'code': _longterm_avg['code'],
-        #                           _feature_name + '_deriv': (_shortterm_avg.values[:, 1] - _longterm_avg.values[:,
-        #                                                                                  1] / dt)})
+        print(f'{len(codes_with_none_average)} of personal codes have None average value')
+        print(f'{len(codes_with_empty_sample)} of personal codes have empty timeseries sample')
+
+
+        _shortterm_avg = pd.DataFrame({
+            'code': codes,
+            f'{_feature_name}_shortterm': avg_now_arr
+        })
+        _longterm_avg = pd.DataFrame({
+            'code': codes,
+            f'{_feature_name}_longterm': avg_past_arr
+        })
+        _deriv_col = pd.DataFrame({
+            'code': codes,
+            f'{_feature_name}_deriv': deriv_arr
+        })
+
         return _shortterm_avg, _longterm_avg, _deriv_col
+
+    def subtract_months(self, date_obj, months):
+        """Subtract months from a datetime.date object"""
+        year = date_obj.year
+        month = date_obj.month
+        day = date_obj.day
+
+        # Subtract months
+        month -= months
+        while month < 1:
+            month += 12
+            year -= 1
+
+        # Ensure day is valid for the new month
+        try:
+            return date(year, month, day)
+        except ValueError:
+            # If day is invalid for the month (e.g., Feb 30), use last day of month
+            return date(year, month, 1) + timedelta(days=-1)
+
+    def add_days(self, date_obj, days):
+        """Add days to a datetime.date object"""
+        return date_obj + timedelta(days=days)
 
     def calc_time_since_events(self, _events: IrregularEvents, _dataset: pd.DataFrame, _snapshot: SnapShot):
         time_since_event = pd.DataFrame({'code': [], _events.feature_name: []})
@@ -421,7 +500,7 @@ class SequoiaDataset:
         shortterm_col = pd.DataFrame({'code': [], _feature_name + '_shortterm': []})
         deriv_col = pd.DataFrame({'code': [], _feature_name + '_deriv': []})
 
-        shortterm_col, longterm_col, deriv_col = self.extract_features_from_timeseries(_dataset, df, longterm_col, shortterm_col, deriv_col, _snapshot)
+        shortterm_col, longterm_col, deriv_col = self.extract_features_from_timeseries(_dataset, df, longterm_col, shortterm_col, deriv_col, _snapshot, _feature_name)
         return shortterm_col, longterm_col, deriv_col
 
     def calc_external_factors(self, _dataset: pd.DataFrame, _snapshot: SnapShot):
@@ -647,46 +726,55 @@ class SequoiaDataset:
         Vectorized replacement for calc_individual_snapshot_start().
         Returns a Pandas Series of `date` objects.
         """
-        # Convert dates to numpy.datetime64 for vectorized arithmetic
         start_date_np = pd.to_datetime(df['start_date']).values
         end_date_np = pd.to_datetime(df['end_date']).values
 
-        # Compute employment period in months
-        empl_period = (end_date_np - start_date_np) / np.timedelta64(30, 'D')
+        seniority = df['seniority'].values
+        period_of_interest = (end_date_np - start_date_np) / np.timedelta64(30, 'D')
 
-        # Initialize snapshot_start with end_date minus 1 month (default for short periods)
-        one_month = np.timedelta64(1, 'M')
-        snapshot_start = end_date_np.astype('datetime64[M]') - one_month
-        snapshot_start = snapshot_start.astype('datetime64[D]')
+        enough_seniority_mask = seniority > 1. / 6.
+        # Mask for employees with sufficient work history within the boundaries
+        mask_long_enough = period_of_interest - snapshot.initial_offset >= snapshot.min_duration
 
-        # Mask for employees with sufficient work history
-        mask_long_enough = empl_period - snapshot.total_offset() >= snapshot.min_duration
+        # Create a combined mask for employees eligible for offsets
+        eligible_mask = enough_seniority_mask & mask_long_enough
+
+        # Initialize offset_months with zeros for all employees
+        offset_months = np.zeros(len(df), dtype=int)
 
         if self.random_snapshot:
             # Compute random initial_offset where applicable
-            individual_max_offset = np.floor(empl_period[mask_long_enough] - snapshot.min_duration).astype(int)
+            individual_max_offset = np.floor(period_of_interest[eligible_mask] - snapshot.min_duration).astype(int)
             valid_mask = individual_max_offset > 0
-            total_offset = np.where(
+
+            # Apply random offsets only to eligible employees
+            random_offsets = np.where(
                 valid_mask,
                 np.random.randint(snapshot.initial_offset, individual_max_offset + 1),
-                snapshot.initial_offset
+                0
             )
-            offset_months = total_offset  # num = 0 for random snapshots
+            offset_months[eligible_mask] = random_offsets
         else:
-            offset_months = snapshot.num * snapshot.step + snapshot.initial_offset
+            fixed_offset = snapshot.num * snapshot.step + snapshot.initial_offset
+            valid_mask = np.floor(period_of_interest[eligible_mask] - fixed_offset - snapshot.min_duration).astype(
+                int) > 0
 
-        # Apply month/year arithmetic only to employees with sufficient history
-        if np.any(mask_long_enough):
-            # Convert total_offset_months to a NumPy array first
-            total_offset_months_arr = np.array(offset_months, dtype='int64')
-            month_offset = (-total_offset_months_arr).astype('timedelta64[M]')
+            # Apply fixed offsets only to eligible employees
+            fixed_offsets = np.where(
+                valid_mask,
+                fixed_offset,
+                0
+            )
+            offset_months[eligible_mask] = fixed_offsets
 
-            # Apply offset
-            snapshot_start[mask_long_enough] = (
-                    end_date_np[mask_long_enough].astype('datetime64[M]')
-                    + month_offset
-                    + np.timedelta64(1, 'D')  # Set day=1
-            ).astype('datetime64[D]')
+        # Apply month/year arithmetic to all employees
+        month_offset = (-offset_months).astype('timedelta64[M]')
+
+        # Apply offset
+        snapshot_start = (
+                end_date_np.astype('datetime64[M]')
+                + month_offset
+        ).astype('datetime64[D]')
 
         # Handle edge cases where snapshot_start <= start_date
         invalid_mask = snapshot_start <= start_date_np
@@ -698,15 +786,15 @@ class SequoiaDataset:
             # Already defaulted to end_date minus 1 month, no need to change
 
         # Ensure snapshot_start is always at least 1 month before end_date
-        too_late_mask = snapshot_start >= (end_date_np.astype('datetime64[M]') - one_month).astype('datetime64[D]')
-        if np.any(too_late_mask):
-            logging.warning(
-                f"Adjusting {np.sum(too_late_mask)} snapshot starts to be at least 1 month before end_date"
-            )
-            # Set to end_date minus 1 month
-            snapshot_start[too_late_mask] = (
-                    end_date_np[too_late_mask].astype('datetime64[M]') - one_month
-            ).astype('datetime64[D]')
+        # too_late_mask = snapshot_start > (end_date_np.astype('datetime64[M]') - one_month).astype('datetime64[D]')
+        # if np.any(too_late_mask):
+        #     logging.warning(
+        #         f"Adjusting {np.sum(too_late_mask)} snapshot starts to be at least 1 month before end_date"
+        #     )
+        #     # Set to end_date minus 1 month
+        #     snapshot_start[too_late_mask] = (
+        #             end_date_np[too_late_mask].astype('datetime64[M]') - one_month
+        #     ).astype('datetime64[D]')
 
         # Convert to date objects
         def datetime64_to_date(dt64):
@@ -759,7 +847,7 @@ class SequoiaDataset:
                             _snapshot.num * _snapshot.step > _snapshot.min_duration)
 
         filter_mask &= (df['Hire date'] < self.data_load_date)
-        filter_mask &= (df['Date of dismissal'] >= self.data_begin_date)
+        filter_mask &= (df['Date of dismissal'] > self.data_begin_date)
 
         if _snapshot.num > 0 and not self.random_snapshot:
             filter_mask &= (df['max_snapshot_duration'] > _snapshot.total_offset())
@@ -793,15 +881,7 @@ class SequoiaDataset:
 
             snapshot_dataset['start_date'] = np.maximum(snapshot_dataset['recruitment_date'], self.data_begin_date)
             snapshot_dataset['end_date'] = np.minimum(snapshot_dataset['termination_date'], self.data_load_date)
-            snapshot_dataset['snapshot_start'] = self.calc_snapshot_start_vectorized(snapshot_dataset, _snapshot).dt.date
 
-            # Convert to datetime64 for the calculation
-            snapshot_dataset['status'] = np.where(
-                (pd.to_datetime(snapshot_dataset['termination_date']) -
-                 pd.to_datetime(snapshot_dataset['snapshot_start'])).dt.days / 30.4 > self.forecast_horison,
-                0,
-                snapshot_dataset['status']
-            )
 
         return snapshot_dataset
 
@@ -915,7 +995,18 @@ class SequoiaDataset:
             main_dataset = self.collect_main_data(self.common_features_name_mapping, input_df_common, self.data_config, snapshot)
             if main_dataset is None:
                 logging.info(f'No data left for snapshot {snapshot.num}. Finishing process...')
-                break
+            main_dataset['snapshot_start'] = self.calc_snapshot_start_vectorized(main_dataset,
+                                                                                     snapshot).dt.date
+
+            # Convert to datetime64 for the calculation
+            main_dataset['status'] = np.where(
+                (pd.to_datetime(main_dataset['termination_date']) -
+                 pd.to_datetime(main_dataset['snapshot_start'])).dt.days / 30.4 > self.forecast_horison,
+                0,
+                main_dataset['status']
+            )
+
+
             logging.debug(f'Formed main part of dataset: {main_dataset}')
             full_snapshot_dataset = self.fill_snapshot_specific(self.specific_features, data_file_path, main_dataset, snapshot)
 

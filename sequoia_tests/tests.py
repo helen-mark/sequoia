@@ -101,7 +101,7 @@ class TestSequoiaDataset(unittest.TestCase):
 
         self.sequoia = SequoiaDataset(data_config, dataset_config)
 
-        # Тестовые данные для calc_numerical_average - исправленный способ создания
+        # Тестовые данные для calc_numerical_average
         dates = [date(2023, 1, 1), date(2023, 2, 1), date(2023, 3, 1),
                  date(2023, 4, 1), date(2023, 5, 1), date(2023, 6, 1)]
         values = [[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]]
@@ -111,6 +111,8 @@ class TestSequoiaDataset(unittest.TestCase):
         #self.test_values_per_month.columns = ['value']
 
         self.snapshot_start = date(2023, 6, 1)
+        self.recr_date = date(2022, 1, 1)
+        self.term_date = date(2024, 1, 1)
 
     def create_test_dataframe_with_dates(self, dates_values_dict):
         """Вспомогательный метод для создания DataFrame с правильными датами"""
@@ -121,7 +123,7 @@ class TestSequoiaDataset(unittest.TestCase):
     def test_calc_numerical_average_basic(self):
         """Тест базового расчета среднего значения"""
         result = self.sequoia.calc_numerical_average(
-            self.test_values_per_month, 3, self.snapshot_start
+            self.test_values_per_month, 3, self.snapshot_start, self.recr_date, self.term_date
         )
         expected = (60.0 + 50.0 + 40.0) / 3  # Последние 3 месяца
         self.assertEqual(result, expected)
@@ -130,17 +132,17 @@ class TestSequoiaDataset(unittest.TestCase):
         """Тест с пустым DataFrame"""
         empty_df = pd.DataFrame()
         with self.assertRaises(AssertionError):
-            self.sequoia.calc_numerical_average(empty_df, 3, self.snapshot_start)
+            self.sequoia.calc_numerical_average(empty_df, 3, self.snapshot_start, self.recr_date, self.term_date)
 
     def test_calc_numerical_average_invalid_period(self):
         """Тест с невалидным периодом"""
         with self.assertRaises(AssertionError):
-            self.sequoia.calc_numerical_average(self.test_values_per_month, 0, self.snapshot_start)
+            self.sequoia.calc_numerical_average(self.test_values_per_month, 0, self.snapshot_start, self.recr_date, self.term_date)
 
     def test_calc_numerical_average_insufficient_data(self):
         """Тест когда данных меньше чем период"""
         result = self.sequoia.calc_numerical_average(
-            self.test_values_per_month, 12, self.snapshot_start
+            self.test_values_per_month, 12, self.snapshot_start, self.recr_date, self.term_date
         )
         expected = (10.0 + 20.0 + 30.0 + 40.0 + 50.0 + 60.0) / 6
         self.assertEqual(result, expected)
@@ -149,7 +151,7 @@ class TestSequoiaDataset(unittest.TestCase):
         """Тест когда нет данных до snapshot_start"""
         future_snapshot = date(2022, 1, 1)
         result = self.sequoia.calc_numerical_average(
-            self.test_values_per_month, 3, future_snapshot
+            self.test_values_per_month, 3, future_snapshot, self.recr_date, self.term_date
         )
         self.assertIsNone(result)
 
@@ -161,7 +163,7 @@ class TestSequoiaDataset(unittest.TestCase):
         })
 
         result = self.sequoia.calc_numerical_average(
-            partial_data, 3, self.snapshot_start
+            partial_data, 3, self.snapshot_start, self.recr_date, self.term_date
         )
         expected = (60.0 + 50.0) / 2  # Только 2 месяца доступно из 3
         self.assertEqual(result, expected)
@@ -176,23 +178,25 @@ class TestSequoiaDataset(unittest.TestCase):
 
         # После реверса в методе, порядок должен измениться
         result = self.sequoia.calc_numerical_average(
-            test_data, 2, date(2023, 6, 1)
+            test_data, 2, date(2023, 6, 1), self.recr_date, self.term_date
         )
         # Должны быть взяты последние 2 месяца после реверса
         expected = (60.0 + 50.0) / 2
         self.assertEqual(result, expected)
 
-    @patch.object(SequoiaDataset, 'prepare_sample')
-    def test_extract_features_from_timeseries(self, mock_prepare_sample):
+    def test_extract_features_from_timeseries(self):
         """Тест извлечения фич из временных рядов"""
         # Подготовка тестовых данных
         test_dataset = pd.DataFrame({
             'code': ['CODE1', 'CODE2'],
             'snapshot_start': [date(2023, 6, 1), date(2023, 2, 1)],
-            'start_date': [date(2022, 1, 1), date(2022, 1, 1)]
+            'start_date': [date(2022, 1, 1), date(2022, 1, 1)],
+            'recruitment_date': [date(2021, 1, 1), date(2021, 1, 1)],
+            'termination_date': [date(2024, 1, 1), date(2024, 1, 1)],
         })
 
         test_feature_df = pd.DataFrame({
+            'code': ['CODE1', 'CODE2'],
             date(2023, 1, 1): [10.0, 15.0],
             date(2023, 2, 1): [20.0, 25.0],
             date(2023, 3, 1): [30.0, 35.0],
@@ -225,18 +229,17 @@ class TestSequoiaDataset(unittest.TestCase):
             date(2023, 2, 1): [25.0],
         })
 
-        mock_prepare_sample.side_effect = [sample_data_1, sample_data_2]
-
         # Create a proper mock for snapshot with min_duration attribute
         snapshot_mock = MagicMock()
         snapshot_mock.min_duration = 1  # Set a numeric value for min_duration
 
         # Mock the min_window attribute on the sequoia instance
         self.sequoia.min_window = 3  # This will be used as shortterm_period
+        feature_name = 'income'
 
         # Вызов тестируемого метода
         result_short, result_long, result_deriv = self.sequoia.extract_features_from_timeseries(
-            test_dataset, test_feature_df, longterm_avg, shortterm_avg, deriv_col, snapshot_mock
+            test_dataset, test_feature_df, longterm_avg, shortterm_avg, deriv_col, snapshot_mock, feature_name
         )
 
         # Проверки
@@ -246,28 +249,27 @@ class TestSequoiaDataset(unittest.TestCase):
         self.assertEqual(result_long['code'].tolist(), ['CODE1', 'CODE2'])
         self.assertEqual(result_short['code'].tolist(), ['CODE1', 'CODE2'])
 
+        print(result_short)
         # Verify shortterm averages are calculated correctly
         # For CODE1: average of [60.0, 50.0, 40.0] = 50.0
-        self.assertAlmostEqual(result_short.loc[0, 'feature_shortterm'], 50.0, places=2)
+        self.assertAlmostEqual(result_short.loc[0, feature_name + '_shortterm'], 50.0, places=2)
 
         # For CODE2: average of [65.0, 55.0, 45.0] = 55.0
-        self.assertAlmostEqual(result_short.loc[1, 'feature_shortterm'], 20.0, places=2)
+        self.assertAlmostEqual(result_short.loc[1, feature_name + '_shortterm'], 20.0, places=2)
 
         # Verify longterm averages are calculated (should be averages from 3 months earlier)
         # The exact values depend on the calc_numerical_average logic with past_timepoint
-        self.assertIsNotNone(result_long.loc[0, 'feature_longterm'])
-        self.assertIsNotNone(result_long.loc[1, 'feature_longterm'])
+        self.assertIsNotNone(result_long.loc[0, feature_name + '_longterm'])
+        self.assertIsNone(result_long.loc[1, feature_name + '_longterm'])
 
         # Verify derivatives are calculated correctly (not None and not error value)
-        self.assertNotEqual(result_deriv.loc[0, 'feature_deriv'], None)
-        self.assertNotEqual(result_deriv.loc[0, 'feature_deriv'], -1000000)
-        self.assertNotEqual(result_deriv.loc[1, 'feature_deriv'], None)
-        self.assertNotEqual(result_deriv.loc[1, 'feature_deriv'], -1000000)
+        self.assertNotEqual(result_deriv.loc[0, feature_name + '_deriv'], None)
+        self.assertNotEqual(result_deriv.loc[0, feature_name + '_deriv'], 0)
+        self.assertIsNone(result_deriv.loc[1, feature_name + '_deriv'])
 
         # Verify derivative calculation: (avg_now - avg_past)
         # This should be positive since values are increasing over time
-        self.assertGreater(result_deriv.loc[0, 'feature_deriv'], 0)
-        self.assertAlmostEqual(result_deriv.loc[1, 'feature_deriv'], 0)
+        self.assertGreater(result_deriv.loc[0, feature_name + '_deriv'], 0)
 
     @patch.object(SequoiaDataset, 'extract_features_from_timeseries')
     @patch.object(SequoiaDataset, 'set_column_labels_as_dates')
@@ -320,13 +322,13 @@ class TestSequoiaDataset(unittest.TestCase):
             date(2023, 1, 1): [10.0],
             date(2023, 2, 1): [np.nan],
             date(2023, 3, 1): [30.0],
-            date(2023, 4, 1): [40.0]
+            date(2023, 4, 1): [np.nan]
         })
 
         result = self.sequoia.calc_numerical_average(
-            test_data, 4, date(2023, 4, 1)
+            test_data, 4, date(2023, 4, 1), self.recr_date, self.term_date
         )
-        expected = (10.0 + 30.0 + 40.0) / 3  # NaN должен быть пропущен
+        expected = 20. # NaN должен быть пропущен
         self.assertEqual(result, expected)
 
     def test_calc_numerical_average_with_string_numbers(self):
@@ -338,7 +340,7 @@ class TestSequoiaDataset(unittest.TestCase):
         })
 
         result = self.sequoia.calc_numerical_average(
-            test_data, 3, date(2023, 3, 1)
+            test_data, 3, date(2023, 3, 1), self.recr_date, self.term_date
         )
         expected = (10.5 + 20.5 + 30.5) / 3
         self.assertEqual(result, expected)
@@ -352,12 +354,11 @@ class TestSequoiaDataset(unittest.TestCase):
         })
 
         result = self.sequoia.calc_numerical_average(
-            test_data, 3, date(2023, 3, 1)
+            test_data, 3, date(2023, 3, 1), self.recr_date, self.term_date
         )
         self.assertIsNone(result)
 
-    @patch.object(SequoiaDataset, 'prepare_sample')
-    def test_extract_features_from_timeseries_with_empty_sample(self, mock_prepare_sample):
+    def test_extract_features_from_timeseries_with_empty_sample(self):
         """Тест извлечения фич когда sample пустой"""
         test_dataset = pd.DataFrame({
             'code': ['CODE1'],
@@ -365,15 +366,13 @@ class TestSequoiaDataset(unittest.TestCase):
             'start_date': [date(2022, 1, 1)]
         })
 
-        # Мокируем пустой sample
-        mock_prepare_sample.return_value = pd.DataFrame()
-
         longterm_avg = pd.DataFrame({'code': [], 'feature_longterm': []})
         shortterm_avg = pd.DataFrame({'code': [], 'feature_shortterm': []})
         deriv_col = pd.DataFrame({'code': [], 'feature_deriv': []})
+        feature_name = 'income'
 
         result_short, result_long, result_deriv = self.sequoia.extract_features_from_timeseries(
-            test_dataset, pd.DataFrame(), longterm_avg, shortterm_avg, deriv_col, MagicMock()
+            test_dataset, pd.DataFrame({'code': ['CODE1']}), longterm_avg, shortterm_avg, deriv_col, MagicMock(), feature_name
         )
 
         # Проверяем что значения None корректно обрабатываются
@@ -396,52 +395,10 @@ class TestSequoiaDataset(unittest.TestCase):
         with self.assertRaises(TypeError):
             # Должна быть ошибка сравнения строки с date
             self.sequoia.calc_numerical_average(
-                string_dates_df, 2, date(2023, 3, 1)
+                string_dates_df, 2, date(2023, 3, 1), self.recr_date, self.term_date
             )
 
-
-
-    def test_fill_average_values_empty_dataset(self):
-        """Тест с пустым dataset"""
-        empty_dataset = pd.DataFrame({'code': []})
-        feature_df = pd.DataFrame({'dummy': []})
-        longterm_avg = pd.DataFrame({'code': [], 'feature_longterm': []})
-        shortterm_avg = pd.DataFrame({'code': [], 'feature_shortterm': []})
-
-        result_short, result_long = self.sequoia.fill_average_values(
-            empty_dataset, feature_df, longterm_avg, shortterm_avg, MagicMock()
-        )
-
-        self.assertEqual(len(result_long), 0)
-        self.assertEqual(len(result_short), 0)
-
-    @patch.object(SequoiaDataset, 'prepare_sample')
-    def test_fill_average_values_with_none_averages(self, mock_prepare_sample):
-        """Тест когда calc_numerical_average возвращает None"""
-        test_dataset = pd.DataFrame({'code': ['CODE1']})
-        test_feature_df = pd.DataFrame({'dummy': [1]})
-
-        # Мокируем prepare_sample чтобы вернуть данные без значений до snapshot
-        empty_sample = self.create_test_dataframe_with_dates({
-            date(2024, 1, 1): [100.0]  # Будущая дата
-        })
-        future_snapshot = date(2023, 1, 1)
-
-        mock_prepare_sample.return_value = (empty_sample, future_snapshot, None)
-
-        longterm_avg = pd.DataFrame({'code': [], 'feature_longterm': []})
-        shortterm_avg = pd.DataFrame({'code': [], 'feature_shortterm': []})
-
-        result_short, result_long = self.sequoia.fill_average_values(
-            test_dataset, test_feature_df, longterm_avg, shortterm_avg, MagicMock()
-        )
-
-        # Проверяем что значения None корректно обрабатываются
-        self.assertTrue(pd.isna(result_long.loc[0, 'feature_longterm']))
-        self.assertTrue(pd.isna(result_short.loc[0, 'feature_shortterm']))
-
-
-# Класс для совместимости с вашим кодом запуска
+# Класс для совместимости с кодом запуска
 class TestTimeSeriesFunctions(TestSequoiaDataset):
     """Алиас для TestSequoiaDataset для совместимости с вашим кодом"""
 
@@ -451,7 +408,7 @@ class TestTimeSeriesFunctions(TestSequoiaDataset):
 
 
 if __name__ == '__main__':
-    # Запуск конкретных тестов как в вашем коде
+    # Запуск конкретных тестов
     t = TestMergeCsv()
     t.check_duplicates_test()
     t.handle_duplicates_test()

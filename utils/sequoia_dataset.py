@@ -94,6 +94,7 @@ class SequoiaDataset:
         self.min_window = _data_config['time_snapshots']['min_window']
         self.max_window = _data_config['time_snapshots']['max_window']
         self.random_snapshot = _data_config['time_snapshots']['random_snapshot']  # make random snapshot offset for each person
+        self.force_fixed_snapshot = _data_config['time_snapshots']['force_fixed_snapshot']
 
         self.forecast_horison = _data_config['options']['forecast_horison']
         self.remove_censored = _data_config['options']['remove_censored']
@@ -167,20 +168,6 @@ class SequoiaDataset:
         if len(absent) > 0:
             raise Exception(f'Required sheets absent in input file: {absent}\nPresent sheetnames: {_actual_sheets}')
 
-    def check_required_fields(self):
-        pass
-
-    def calc_age(self):
-        pass
-
-    def calc_company_seniority(self):
-        pass
-
-    def calc_overall_experience(self):
-        pass
-
-    def calc_license_expiration(self):
-        pass
 
     @staticmethod
     def set_column_labels_as_dates(_input_df: pd.DataFrame):
@@ -200,7 +187,7 @@ class SequoiaDataset:
 
     def calc_numerical_average(self, _values_per_month: pd.DataFrame, _period_months: int, _snapshot_timepoint: datetime.date, _recr_date: datetime.date, _term_date: datetime.date):
         assert not _values_per_month.empty
-        assert _period_months > 0
+        #assert _period_months > 0
         values_reversed = _values_per_month[_values_per_month.columns[::-1]]  # this operation reverses order of columns
         values_sum = 0.
         count = 0
@@ -227,8 +214,8 @@ class SequoiaDataset:
                 # Employee worked only from recr_day to term_day in the same month
                 days_worked = term_day - recr_day + 1  # +1 to include both start and end days
                 if days_worked > 0:
-                    print(
-                        f' Short employment: {days_worked} days worked. Approximated {val_corr} by {val_corr * days_in_month / days_worked}')
+                    #print(
+                    #    f' Short employment: {days_worked} days worked. Approximated {val_corr} by {val_corr * days_in_month / days_worked}')
                     val_corr = val_corr * days_in_month / days_worked
                 else:
                     print(f' Warning: Negative or zero days worked: recr_day={recr_day}, term_day={term_day}')
@@ -238,8 +225,8 @@ class SequoiaDataset:
                 if recr_day != 1:
                     # Employee worked from recr_day to end of month
                     days_worked = days_in_month - recr_day + 1
-                    print(
-                        f' First month: {days_worked} days worked. Approximated {val_corr} by {val_corr * days_in_month / days_worked}')
+                    #print(
+                    #    f' First month: {days_worked} days worked. Approximated {val_corr} by {val_corr * days_in_month / days_worked}')
                     val_corr = val_corr * days_in_month / days_worked
 
             # Handle partial last month only (termination)
@@ -259,7 +246,7 @@ class SequoiaDataset:
             #print(f'date:{date}, snapshot:{_snapshot_timepoint}, recr: {_recr_date}, term: {_term_date}')
             if date <= _snapshot_timepoint and date >= _recr_date.replace(day=1) and date <= _term_date.replace(day=1):  # don't take the last months of the employee! the salary is incomplete
                 not_full_month = date == _recr_date.replace(day=1)
-                not_full_last_month = date == _term_date.replace(day=1)
+                not_full_last_month = date == _term_date.replace(day=1)  # equals data_load_date for working employees
 
                 #print(f'not full month: {not_full_month}')
                 tot += 1
@@ -567,11 +554,14 @@ class SequoiaDataset:
         dataset = _dataset.copy()
 
         # Convert string values to float (handling commas as decimals)
-        dataset[_feature_name] = dataset[_feature_name].str.replace(',', '.', regex=True).astype(float)
+        dataset[_feature_name] = dataset[_feature_name].astype(str).str.replace(',', '.', regex=True).astype(float)
 
         dataset[_feature_name] = dataset[_feature_name].abs()
 
-        days_diff = (dataset['termination_date'] - dataset['snapshot_start']).dt.days
+        days_diff = (
+                pd.to_datetime(dataset['termination_date'], errors='coerce') -
+                pd.to_datetime(dataset['snapshot_start'], errors='coerce')
+        ).dt.days
         years_diff = days_diff / 365
 
         dataset[_feature_name] = dataset[_feature_name] - years_diff
@@ -837,6 +827,9 @@ class SequoiaDataset:
         # Ensure the array is datetime64 (handles mixed input)
         for i, s in enumerate(snapshot_start):
             snapshot_start[i] = s.astype('datetime64[D]').item()
+
+        if self.force_fixed_snapshot:
+            snapshot_start = np.full(len(df), np.datetime64('2024-12-01'))
         # Apply conversion
         return pd.Series(snapshot_start, index=df.index)
 
@@ -991,6 +984,7 @@ class SequoiaDataset:
             for col in _dataset.columns:
                 if 'income' in col or 'salary' in col:  # money related features
                     time_point = _dataset[_dataset['code']==code]['snapshot_start'].item()
+                    income_corrected = row[col]
                     if self.calibrate_by == 'Inflation' and not pd.isna(row[col]):
                         income_corrected = self.calibrate_by_inflation(row[col], time_point, rate)
                     elif self.calibrate_by == 'Living wage' and not pd.isna(row[col]):

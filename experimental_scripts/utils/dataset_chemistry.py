@@ -117,13 +117,27 @@ def collect_datasets(_data_path: str, _remove_small_period: bool = False, _remov
                     dataset = dataset[dataset[col] != -1000000]
                     print('removed wrong derivative')
 
+        def get_season(month):
+            month = int(month)  # Convert to integer
+            if month in [3, 4, 5]:
+                return 1
+            elif month in [6, 7, 8]:
+                return 2
+            elif month in [9, 10, 11]:
+                return 3
+            else:  # 12, 1, 2
+                return 4
+
+        # First extract month, then apply season function
+        dataset['month'] = dataset['snapshot_start'].str.split('-').str[1]
+        dataset['season'] = dataset['month'].apply(get_season)
         strings_to_drop = ['long', 'birth', 'external_factor_', 'recruit', 'snapshot_start', 'date', 'depar',  'hazards', 'Unnamed', 'internal', 'deriv']
                            #'deriv', 'internal', 'family', 'children', 'overtime', 'education', 'region', 'city', 'total', 'vacations_per', 'salary_per']  #'overtime'
         dataset = dataset.drop(
             columns=[c for c in dataset.columns if any(string in c for string in strings_to_drop)])
         # Remove rows where income_shortterm <= 0
         dataset = dataset[dataset['income_shortterm'] > 0]
-        dataset = dataset[dataset['vacation_days_shortterm'] > 0]
+        #dataset = dataset[dataset['vacation_days_shortterm'] > 0]
 
         print("cols after", dataset.columns)
         dataset = shuffle(dataset)

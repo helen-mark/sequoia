@@ -775,7 +775,7 @@ if __name__ == '__main__':
         'make_synthetic': None,  # options: 'sdv', 'ydata', None
         'smote': False,  # perhaps not needed for catboost and in case if minority : majority > 0.5
         'random_split': False,
-        'cat_features': ['gender', 'season', 'month', 'citizenship', 'job_category', 'field', 'city', 'education', 'family_status']
+        'cat_features': ['gender', 'season', 'month', 'year', 'citizenship', 'job_category', 'field', 'city', 'education', 'family_status']
     }
 
     main(config)

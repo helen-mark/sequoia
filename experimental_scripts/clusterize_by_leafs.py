@@ -392,6 +392,7 @@ if __name__ == "__main__":
     # 6. Применяем к новым данным
     y_pred_proba_test = model.predict_proba(X_test)[:, 1]
 
+    print("Test data")
     final_predictions, test_clusters = optimizer.predict_with_cluster_thresholds(
         X_test,
         y_pred_proba_test

@@ -10,17 +10,13 @@ os.environ['YDATA_LICENSE_KEY'] = '97d0ae93-9dfc-4c2a-9183-a0420a4d0771'
 
 import pickle
 import warnings
-
+import shap
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from scipy import stats
 from openpyxl.drawing.image import Image
 import openpyxl
-from datetime import date
-from pandas import read_csv
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, precision_score, recall_score, f1_score, confusion_matrix, precision_recall_curve, balanced_accuracy_score
 from sklearn.model_selection import train_test_split, cross_val_score
 import optuna
@@ -29,6 +25,8 @@ from sklearn.feature_selection import RFECV
 from io import BytesIO
 from openpyxl import Workbook
 
+from catboost import MetricVisualizer
+
 
 from pathlib import Path
 # from examples.local import setting_dask_env
@@ -36,6 +34,7 @@ from pathlib import Path
 import seaborn as sn
 import matplotlib.pyplot as plt
 
+from model_testing import test_model
 from utils.dataset_chemistry import create_features_for_datasets, collect_datasets, minority_class_resample, prepare_dataset_2, get_united_dataset, remove_short_service
 
 # industry_avg_income = df.groupby('field')['income_shortterm'].mean().to_dict()
@@ -84,26 +83,444 @@ def train_xgboost_classifier(_x_train, _y_train, _x_test, _y_test, _sample_weigh
 
     return best_model
 
+class CustomPrecisionMetric:
+    """Более надежная версия для любой классификации"""
+
+    def get_final_error(self, error, weight):
+        return error / weight if weight != 0 else 0
+
+    def is_max_optimal(self):
+        return True
+
+    def evaluate(self, approxes, target, weight):
+        """
+        approxes: list of list of floats - логиты для каждого класса
+        """
+        # Конвертируем в numpy
+        approxes_np = np.array(approxes).T  # транспонируем: [объекты, классы]
+
+        # Преобразуем логиты в вероятности через softmax
+        # Для бинарной классификации softmax эквивалентен сигмоиде
+        exp_approx = np.exp(approxes_np - np.max(approxes_np, axis=1, keepdims=True))
+        probas = exp_approx / np.sum(exp_approx, axis=1, keepdims=True)
+
+        # Вероятность положительного класса (последний столбец)
+        pos_probas = probas[:, -1] if probas.shape[1] > 1 else probas[:, 0]
+
+        # Порог
+        threshold = 0.2
+        y_pred = (pos_probas > threshold).astype(int)
+        y_true = np.array(target)
+
+        # Расчет precision
+        true_positives = np.sum((y_pred == 1) & (y_true == 1))
+        predicted_positives = np.sum(y_pred == 1)
+
+        if predicted_positives == 0:
+            precision = 0.001  # чтобы избежать NaN
+        else:
+            precision = true_positives / predicted_positives
+
+        return precision, 1
+
+
+class CustomPrecisionMetricSimple:
+    """Упрощенная версия, совместимая с CatBoost"""
+
+    def __init__(self, threshold=0.5):
+        self.threshold = threshold
+
+    def get_final_error(self, error, weight):
+        return error
+
+    def is_max_optimal(self):
+        return True
+
+    def evaluate(self, approxes, target, weight):
+        """
+        approxes: list of list of floats
+        """
+        # Для CatBoost в бинарной классификации approxes[1] - логиты для класса 1
+        if len(approxes) == 2:
+            approx = np.array(approxes[1])  # логиты для класса 1
+        else:
+            approx = np.array(approxes[0])
+
+        # Сигмоида
+        probas = 1 / (1 + np.exp(-approx))
+        y_pred = (probas > self.threshold).astype(int)
+        y_true = np.array(target)
+
+        # Precision
+        tp = np.sum((y_pred == 1) & (y_true == 1))
+        pp = np.sum(y_pred == 1)
+
+        if pp == 0:
+            return 0.0, 1  # Возвращаем 0 вместо малого значения
+        else:
+            return tp / pp, 1
+
+
+class PrecisionAtKMetric:
+    def __init__(self, k=100):
+        self.k = k
+
+    def get_final_error(self, error, weight):
+        return error
+
+    def is_max_optimal(self):
+        return True
+
+    def evaluate(self, approxes, target, weight):
+        probas = 1 / (1 + np.exp(-np.array(approxes[0])))
+
+        # Берем топ-K по вероятности
+        top_k_indices = np.argsort(probas)[-self.k:]
+        y_pred_top_k = np.zeros_like(probas)
+        y_pred_top_k[top_k_indices] = 1
+
+        # Precision@K
+        precision = precision_score(target, y_pred_top_k, zero_division=0)
+        return precision, 1
+
+    def evaluate2(self, approxes, target, weight):
+        # Ищем оптимальный порог для precision на лету
+        probas = 1 / (1 + np.exp(-np.array(approxes[0])))
+
+        # Перебираем пороги
+        best_precision = 0
+        for threshold in np.arange(0.1, 0.9, 0.05):
+            y_pred = (probas > threshold).astype(int)
+            precision = precision_score(target, y_pred, zero_division=0)
+            best_precision = max(best_precision, precision)
+
+        return best_precision, 1
+
+def active_learning_for_precision(model, X_pool, uncertainty_threshold=0.3):
+    """
+    Активное обучение: выбираем примеры, где модель наименее уверена
+
+    Parameters:
+    -----------
+    model : обученная модель
+    X_pool : pool данных для активного обучения
+    uncertainty_threshold : порог неопределенности
+
+    Returns:
+    --------
+    uncertain_indices : индексы примеров с наибольшей неопределенностью
+    """
+    # Получаем вероятности предсказаний
+    probas = model.predict_proba(X_pool)
+
+    # Уверенность модели = максимальная вероятность среди классов
+    confidence = np.max(probas, axis=1)
+
+    # Находим примеры с низкой уверенностью (высокая неопределенность)
+    uncertain_indices = np.where(confidence < uncertainty_threshold)[0]
+
+    return uncertain_indices
+
+
+def train_catboost_active_learning(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded,
+                                   _num_iters):
+    """
+    Функция обучения CatBoost с активным обучением
+
+    Parameters:
+    -----------
+    _x_train, _y_train : начальный обучающий набор
+    _x_test, _y_test : тестовый набор для валидации
+    _sample_weight : веса объектов
+    _cat_feats_encoded : категориальные признаки
+    _num_iters : количество итераций активного обучения
+
+    Returns:
+    --------
+    model : обученная модель CatBoost
+    """
+
+    # Инициализируем модель с теми же параметрами
+    model = CatBoostClassifier(
+        iterations=800,
+        learning_rate=0.017,
+        depth=5,
+        l2_leaf_reg=9.0,
+        bootstrap_type='Bayesian',
+        min_data_in_leaf=50,
+        auto_class_weights='Balanced',
+        eval_metric='BalancedAccuracy',  # Используем Precision@K
+        verbose=False,
+        random_seed=42
+    )
+
+    # Разделяем данные на начальный обучающий набор и pool для активного обучения
+    # Для простоты предположим, что _x_train, _y_train уже содержат начальный набор
+    # В реальном сценарии вам нужно разделить данные
+
+    # Создаем копии для активного обучения
+    X_current = _x_train.copy()
+    y_current = _y_train.copy()
+
+    # Если у нас есть отдельный pool данных для активного обучения
+    # Здесь для примера используем часть тестовых данных как pool
+    # В реальном приложении у вас должен быть отдельный pool неразмеченных данных
+    X_pool = _x_test.copy()
+    y_pool = _y_test.copy()
+
+    print("Начинаем активное обучение...")
+
+    # Количество примеров для добавления за итерацию
+    n_samples_per_iteration = max(10, len(X_pool) // (_num_iters * 2))
+
+    for iteration in range(_num_iters):
+        print(f"\n{'=' * 60}")
+        print(f"Итерация активного обучения {iteration + 1}/{_num_iters}")
+        print(f"{'=' * 60}")
+
+        # 1. Обучаем модель на текущих данных
+        print(f"Размер обучающей выборки: {len(X_current)}")
+        print("Обучение модели...")
+
+        model.fit(
+            X_current,
+            y_current,
+            verbose=False
+        )
+
+        # 2. Оцениваем модель на тестовых данных
+        if len(_x_test) > 0 and len(_y_test) > 0:
+            y_pred = model.predict(_x_test)
+            precision = precision_score(_y_test, y_pred, zero_division=0)
+            print(f"Precision на тесте: {precision:.4f}")
+
+        # 3. Проверяем, остались ли данные в pool
+        if len(X_pool) == 0:
+            print("Pool данных пуст. Завершаем активное обучение.")
+            break
+
+        # 4. Выбираем наиболее неопределенные примеры из pool
+        print("Выбор наиболее неопределенных примеров...")
+        uncertain_indices = active_learning_for_precision(
+            model,
+            X_pool,
+            uncertainty_threshold=0.3
+        )
+
+        # 5. Выбираем примеры для добавления
+        if len(uncertain_indices) > 0:
+            # Берем n_samples_per_iteration самых неопределенных примеров
+            n_to_select = min(n_samples_per_iteration, len(uncertain_indices))
+
+            # Получаем уверенность модели для неопределенных примеров
+            confidence = np.max(model.predict_proba(X_pool), axis=1)
+
+            # Сортируем по уверенности (от наименее уверенных)
+            sorted_indices = uncertain_indices[np.argsort(confidence[uncertain_indices])]
+            selected_indices = sorted_indices[:n_to_select]
+
+            print(f"Выбрано {n_to_select} неопределенных примеров")
+
+            # 6. Добавляем выбранные примеры в обучающую выборку
+            if isinstance(X_current, np.ndarray):
+                X_current = np.vstack([X_current, X_pool[selected_indices]])
+                y_current = np.concatenate([y_current, y_pool[selected_indices]])
+            else:
+                # Для pandas DataFrame
+                X_current = pd.concat([X_current, X_pool.iloc[selected_indices]])
+                y_current = pd.concat([y_current, y_pool.iloc[selected_indices]])
+
+            # 7. Удаляем выбранные примеры из pool
+            mask = np.ones(len(X_pool), dtype=bool)
+            mask[selected_indices] = False
+
+            if isinstance(X_pool, np.ndarray):
+                X_pool = X_pool[mask]
+                y_pool = y_pool[mask]
+            else:
+                X_pool = X_pool.iloc[mask]
+                y_pool = y_pool.iloc[mask]
+
+            print(f"Новый размер обучающей выборки: {len(X_current)}")
+            print(f"Осталось в pool: {len(X_pool)}")
+        else:
+            print("Нет достаточно неопределенных примеров в pool")
+
+            # Если нет неопределенных примеров, берем случайные
+            n_to_select = min(n_samples_per_iteration, len(X_pool))
+            if n_to_select > 0:
+                random_indices = np.random.choice(len(X_pool), n_to_select, replace=False)
+
+                # Добавляем случайные примеры
+                if isinstance(X_current, np.ndarray):
+                    X_current = np.vstack([X_current, X_pool[random_indices]])
+                    y_current = np.concatenate([y_current, y_pool[random_indices]])
+                else:
+                    X_current = pd.concat([X_current, X_pool.iloc[random_indices]])
+                    y_current = pd.concat([y_current, y_pool.iloc[random_indices]])
+
+                # Удаляем из pool
+                mask = np.ones(len(X_pool), dtype=bool)
+                mask[random_indices] = False
+
+                if isinstance(X_pool, np.ndarray):
+                    X_pool = X_pool[mask]
+                    y_pool = y_pool[mask]
+                else:
+                    X_pool = X_pool.iloc[mask]
+                    y_pool = y_pool.iloc[mask]
+
+                print(f"Добавлено {n_to_select} случайных примеров")
+                print(f"Новый размер обучающей выборки: {len(X_current)}")
+                print(f"Осталось в pool: {len(X_pool)}")
+
+    print(f"\n{'=' * 60}")
+    print("Активное обучение завершено!")
+    print(f"Итоговый размер обучающей выборки: {len(X_current)}")
+    print(f"{'=' * 60}")
+
+    # Финальное обучение на всей собранной выборке
+    print("\nФинальное обучение на всей собранной выборке...")
+    model.fit(
+        X_current,
+        y_current,
+        verbose=True  # Показываем прогресс финального обучения
+    )
+
+    return model
+
+
+# Альтернативная версия с использованием Pool для активного обучения
+def train_catboost_with_pool(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
+    """
+    Упрощенная версия с предопределенным pool для активного обучения
+    """
+
+    # Предполагаем, что у нас есть отдельный pool данных
+    # В реальном сценарии эти данные должны быть переданы как параметры
+
+    # Разделяем данные на обучающие и pool (пример - 70% train, 30% pool)
+    from sklearn.model_selection import train_test_split
+
+    X_initial, X_pool, y_initial, y_pool = train_test_split(
+        _x_train, _y_train,
+        test_size=0.3,
+        stratify=_y_train,
+        random_state=42
+    )
+
+    print(f"Начальный размер обучающей выборки: {len(X_initial)}")
+    print(f"Размер pool для активного обучения: {len(X_pool)}")
+
+    model = CatBoostClassifier(
+        iterations=800,
+        learning_rate=0.017,
+        depth=5,
+        l2_leaf_reg=9.0,
+        bootstrap_type='Bayesian',
+        min_data_in_leaf=50,
+        auto_class_weights='Balanced',
+        eval_metric=PrecisionAtKMetric(k=100),
+        verbose=False,
+        random_seed=42
+    )
+
+    # Используем функцию active_learning_for_precision, определенную выше
+    # Процесс аналогичен предыдущей функции
+
+    # Для краткости возвращаем модель, обученную на начальных данных
+    print("Обучение на начальных данных...")
+    model.fit(X_initial, y_initial, verbose=False)
+
+    return model
+
+
+# Основная функция для выбора стратегии
+def train_catboost_active(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters,
+                   use_active_learning=True, active_learning_pool=None):
+    """
+    Основная функция обучения CatBoost с опциональным активным обучением
+
+    Parameters:
+    -----------
+    use_active_learning : использовать ли активное обучение
+    active_learning_pool : дополнительные данные для активного обучения (X_pool, y_pool)
+    """
+
+    if use_active_learning and active_learning_pool is not None:
+        print("Используем активное обучение с предоставленным pool...")
+        X_pool, y_pool = active_learning_pool
+
+        # Объединяем начальные данные с pool для активного обучения
+        return train_catboost_active_learning(
+            _x_train, _y_train, _x_test, _y_test, X_pool, y_pool,
+            _sample_weight, _cat_feats_encoded, _num_iters
+        )
+    elif use_active_learning:
+        print("Используем активное обучение с разделением данных...")
+        return train_catboost_with_pool(
+            _x_train, _y_train, _x_test, _y_test,
+            _sample_weight, _cat_feats_encoded, _num_iters
+        )
+    else:
+        print("Используем стандартное обучение без активного обучения...")
+        model = CatBoostClassifier(
+            iterations=800,
+            learning_rate=0.017,
+            depth=5,
+            l2_leaf_reg=9.0,
+            bootstrap_type='Bayesian',
+            min_data_in_leaf=50,
+            auto_class_weights='Balanced',
+            eval_metric=CustomPrecisionMetric(),
+            verbose=False,
+            random_seed=42
+        )
+
+        model.fit(_x_train, _y_train, verbose=False)
+        return model
+
 def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _num_iters):
     # model already initialized with latest version of optimized parameters for our dataset
     model = CatBoostClassifier(
-        iterations=766,  # default to 1000
-        # learning_rate=0.0254,
-        # od_type='Iter',
-        l2_leaf_reg=12,
-        bootstrap_type='MVS',
-        # od_wait=52,
-        depth=10,  # normally set it from 6 to 10
-        eval_metric='BalancedAccuracy',
-        # #random_seed=42,
-        # sampling_frequency='PerTreeLevel',
-        random_strength=1,  # default: 1
-        # loss_function="Logloss",
-        # #bagging_temperature=2,
-        # auto_class_weights='Balanced',
-        scale_pos_weight=2
-    )
+        iterations=800,
+        learning_rate=0.017,
+        depth=5,  # Более мелкие деревья для временных данных
+        l2_leaf_reg=5.0,  # Сильная регуляризация из-за корреляции?
 
+        # Критически важно для временных данных
+        #has_time=True,  # Если есть временная метка
+        bootstrap_type='Bayesian',  # Байесовский бэггинг лучше для зависимых данных
+        #bagging_temperature=0.5,  # Контроль случайности бэггинга
+
+        # Предотвращение переобучения на автокорреляцию
+        # subsample=0.6,  # Еще более агрессивный бэггинг
+        min_data_in_leaf=40,  # Больше сэмплов в листе
+        #max_leaves=32,
+        auto_class_weights='Balanced',
+
+        # Веса для учета дублирования
+
+        eval_metric='BalancedAccuracy',
+        # early_stopping_rounds=75,
+    )
+    #model = CatBoostClassifier(
+       #  iterations=900,  # default to 1000
+       #  #learning_rate=0.1,
+       #  od_type='IncToDec',
+       #  l2_leaf_reg=5,
+       #  bootstrap_type='Bayesian',
+       #  # od_wait=52,
+       #  depth=4,  # normally set it from 6 to 10
+       #  eval_metric='BalancedAccuracy',
+       #  # #random_seed=42,
+       #  # sampling_frequency='PerTreeLevel',
+       #  random_strength=1,  # default: 1
+       #  # loss_function="Logloss",
+       #  # #bagging_temperature=2,
+       #  # auto_class_weights='Balanced',
+       # # scale_pos_weight=7
+    #)
 
     # model = CatBoostClassifier(
     #     iterations=892,  # 400  # Fewer trees + early stopping
@@ -125,8 +542,8 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
     def objective(trial):
         train_pool = Pool(_x_train, _y_train)
         eval_pool = Pool(_x_test, _y_test)
-        params={'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
-                'iterations': trial.suggest_int('iterations', 200, 1000),
+        params={'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.2, log=True),
+                'iterations': trial.suggest_int('iterations', 400, 1000),
                 'depth': trial.suggest_int('depth', 4, 8),
                 'l2_leaf_reg': trial.suggest_int('l2_leaf_reg1', 3, 15),
                 'od_wait': trial.suggest_int('od_wait', 20, 80),
@@ -145,10 +562,10 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         # Get validation predictions
         y_pred = model1.predict(_x_test)
         score = balanced_accuracy_score(_y_test, y_pred)
-        #score = cross_val_score(model, pd.concat([_x_train, _x_test]), pd.concat([_y_train, _y_test]), cv=3, scoring='roc_auc').mean()
+        #score = cross_val_score(model, pd.concat([_x_train, _x_test]), pd.concat([_y_train, _y_test]), cv=5, scoring='roc_auc').mean()
         return score
     # study = optuna.create_study(direction='maximize')
-    # study.optimize(objective, n_trials=300)
+    # study.optimize(objective, n_trials=200)
     # print(f"Best parameters of optuna: {study.best_params}")
 
     # perform feature selection
@@ -162,7 +579,7 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
 
     #selected_features = _x_train.columns[selector.support_]
     #print(f'Selected features: {selected_features}')
-
+    print("Start fitting...")
     model.fit(
         _x_train,
         _y_train,
@@ -170,11 +587,12 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
         verbose=False,
         # sample_weight=_sample_weight,
         # plot=True,
-        # cat_features=_cat_feats_encoded - do this if haven't encoded cat features
+        # cat_features=_cat_feats_encoded  # - do this if haven't encoded cat features
     )
+    print('FItting finished')
     # with open('model_chemistry_52_49_066.pkl', 'rb') as file:
     #     model = pickle.load(file)
-    train_pool = Pool(data=_x_train, label=_y_train)
+    train_pool = Pool(data=_x_train, label=_y_train)  #, cat_features=_cat_feats_encoded)
     shap_values = model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
     feature_names = _x_train.columns
 
@@ -263,7 +681,7 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
     sorted_idx_abs = np.argsort(importance_abs)[::-1]  # Индексы от наибольшего к наименьшему
 
     # Берем только топ 25
-    top_25_idx = sorted_idx_abs[:25]
+    top_25_idx = sorted_idx_abs[:40]
     top_25_features = [translate_feature_name(feature_names[i]) for i in top_25_idx]
     top_25_abs_shap = [importance_abs[i] for i in top_25_idx]
 
@@ -274,8 +692,11 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
     plt.title('Топ 25 самых важных признаков (абсолютные значения)', fontsize=14)
     plt.xlabel('Среднее абсолютное значение SHAP')
     plt.tight_layout()
-    plt.show()
+   # plt.show()
     plt.clf()
+
+    #shap.dependence_plot("average_responses_count_9_historical", shap_values[:,:-1], _x_train)
+
 
     # Дополнительно: выводим топ 25 фичей
     print("\nТоп 25 самых важных признаков:")
@@ -284,6 +705,30 @@ def train_catboost(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_fe
 
     return model
 
+
+def save_value_to_csv(ba, r, p, filename='values_employees.csv'):
+    """
+    Append a floating point value to a CSV file in column 0
+
+    Args:
+        value: float value to save
+        filename: name of the CSV file
+    """
+    # Create a DataFrame with the value
+    new_row = pd.DataFrame({'ba': [ba], 'r': [r], 'p': [p]})
+
+    # Append to existing file or create new one
+    if os.path.exists(filename):
+        # Read existing file and append new row
+        existing_df = pd.read_csv(filename)
+        updated_df = pd.concat([existing_df, new_row], ignore_index=True)
+    else:
+        # Create new file
+        updated_df = new_row
+
+    # Save to CSV
+    updated_df.to_csv(filename, index=False)
+    print(f"Values appended to {filename}")
 
 def train(_x_train, _y_train, _x_test, _y_test, _sample_weight, _cat_feats_encoded, _model_name, _num_iters):
     if _model_name == 'XGBoostClassifier':
@@ -328,7 +773,7 @@ def create_shap_barchart(feature_names, shap_values, top_n=5):
 
 def calc_empirical_threshold(proba_scores, recall, precision):
     # Параметры модели
-    actual_attrition_rate = 0.16
+    actual_attrition_rate = 0.113
 
     # Вычисляем целевую долю предсказаний
     target_positive_rate = (recall / precision) * actual_attrition_rate
@@ -365,13 +810,17 @@ def calc_threshold_by_hist(y_proba):
     plt.title('CatBoost Prediction Probabilities Distribution')
     plt.xticks(np.arange(0, 1.1, 0.1))
     plt.grid(axis='y', alpha=0.3)
-    plt.show()
+    #plt.show()
+    plt.clf()
     return 0
 
-def test(_model, _test_data):
+def test(_model, _test_data, _cat_features, _inference=False):
+    pos_class = 700
+    neg_class = 5500
+
     test_data_all = pd.concat(_test_data, axis=0)
     trg = test_data_all['status']
-    feat = test_data_all.drop(columns=['status', 'code'], errors='ignore')
+    feat = test_data_all.drop(columns=['code'], errors='ignore')
 
     N_1 = len([y for y in trg if y == 1])
     N_0 = len([y for y in trg if y == 0])
@@ -381,48 +830,81 @@ def test(_model, _test_data):
         denominator = numerator + (1 - P) * (new_M / M)
         return numerator / denominator
 
-    predictions = _model.predict_proba(feat)
-    y_proba_united = predictions[:, 1]
-    precision, recall, thresholds = precision_recall_curve(trg, y_proba_united)
+    cat_columns = [col for col in feat.columns if col.startswith('job_category_2_')]
+    for cat_col in cat_columns:
+        print(f'\nCategory: {cat_col}')
+        cat_name = cat_col.replace('job_category_2_', '')
 
-    f1_scores = 2 * (precision * recall) / (precision + recall + 1e-9)
+        #if cat_name not in ['электромонтер, электрик', 'оператор, аппаратчик', 'составитель поездов, ремонтник вагонов, монтер', 'производство, разное']:
+        #    continue
 
-    # Находим порог с максимальным F1
-    optimal_idx = np.argmax(f1_scores)
-    optimal_threshold = thresholds[optimal_idx]
+        # Extract the actual category name from the column name
+        # Assuming format is 'job_category_2_actualname'
 
-    threshold = [optimal_threshold]
+        for seniority in [100]:
+            print(f'Seniority {seniority}')
 
-    print(f"Testing on united data with threshold = {threshold}...")
-    predictions_bin = (predictions[:, 1] > threshold).astype(int)
+            # Filter data where this category column == 1
+            mask = (feat[cat_col] == 1) & (feat['seniority'] < seniority)
 
-    f1_united = f1_score(trg, predictions_bin)
-    recall_united = recall_score(trg, predictions_bin)
-    precision_united = precision_score(trg, predictions_bin)
-    precision_united = adjusted_precision(precision_united, N_1, N_0, 1430, 8570)
-    ba = balanced_accuracy_score(trg, predictions_bin)
+            if mask.sum() > 100:  # Check if there's data
+                print(f'Amount: {mask.sum()}')
+                # predictions = _model.predict_proba(feat[mask][feat['status']==1].drop(columns=['status']))
+                # y_proba_united = predictions[:, 1]
+                # calc_threshold_by_hist(y_proba_united)
+                # predictions = _model.predict_proba(feat[mask][feat['status']==0].drop(columns=['status']))
+                # y_proba_united = predictions[:, 1]
+                # calc_threshold_by_hist(y_proba_united)
 
-    print(f"CatBoost result: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}, ba = {ba:.2f}")
-    result = confusion_matrix(trg, predictions_bin)
-    sn.set(font_scale=1.4)  # for label size
-    sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='g')  # font size
+                predictions = _model.predict_proba(feat[mask].drop(columns=['status']))
+                y_proba_united = predictions[:, 1]
 
-    plt.show()
-    plt.clf()
+                # Make sure target has matching indices
+                trg_filtered = trg[mask]
 
-    empirical_thresh=calc_empirical_threshold(y_proba_united, recall_united, precision_united)
-    predictions_bin = (predictions[:, 1] > empirical_thresh).astype(int)
+                if len(np.unique(trg_filtered)) > 1:  # Need both classes for PR curve
+                    precision, recall, thresholds = precision_recall_curve(trg_filtered, y_proba_united)
 
-    f1_united = f1_score(trg, predictions_bin)
-    recall_united = recall_score(trg, predictions_bin)
-    precision_united = precision_score(trg, predictions_bin)
-    precision_united = adjusted_precision(precision_united, N_1, N_0, 1430, 8570)
-    ba = balanced_accuracy_score(trg, predictions_bin)
+                f1_scores = 2 * (precision * recall) / (precision + recall + 1e-9)
 
-    hist_thresh = calc_threshold_by_hist(y_proba_united)
+                # Находим порог с максимальным F1
+                optimal_idx = np.argmax(f1_scores)
+                optimal_threshold = thresholds[optimal_idx]
 
-    print(f"CatBoost result with empirical threshold: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}, ba = {ba:.2f}")
+                thresholds = [optimal_threshold]
 
+                for threshold in thresholds:
+                    print(f"Testing on united data with threshold = {threshold}...")
+                    predictions_bin = (predictions[:, 1] > threshold).astype(int)
+
+                    f1_united = f1_score(trg_filtered, predictions_bin)
+                    recall_united = recall_score(trg_filtered, predictions_bin)
+                    precision_united = precision_score(trg_filtered, predictions_bin)
+                    #precision_united = adjusted_precision(precision_united, N_1, N_0, pos_class, neg_class)
+                    ba = balanced_accuracy_score(trg_filtered, predictions_bin)
+
+                    print(f"CatBoost result: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}, ba = {ba:.2f}, pos_pred = {predictions_bin.mean():.2f}%")
+                save_value_to_csv(ba, recall_united, precision_united)
+
+
+
+                result = confusion_matrix(trg_filtered, predictions_bin)
+                sn.set(font_scale=1.4)  # for label size
+                sn.heatmap(result, annot=True, annot_kws={"size": 16}, fmt='g')  # font size
+
+                #plt.show()
+                plt.clf()
+
+                empirical_thresh=calc_empirical_threshold(y_proba_united, 45, 39)
+                predictions_bin = (predictions[:, 1] > empirical_thresh).astype(int)
+
+                f1_united = f1_score(trg_filtered, predictions_bin)
+                recall_united = recall_score(trg_filtered, predictions_bin)
+                precision_united = precision_score(trg_filtered, predictions_bin)
+                precision_united = adjusted_precision(precision_united, N_1, N_0, pos_class, neg_class)
+                ba = balanced_accuracy_score(trg_filtered, predictions_bin)
+
+                print(f"CatBoost result with empirical threshold: F1 = {f1_united:.2f}, Recall = {recall_united:.2f}, Precision - {precision_united:.2f}, ba = {ba:.2f}")
 
     print("Testing separately...")
     for t in _test_data:
@@ -440,12 +922,12 @@ def test(_model, _test_data):
 
         # Находим порог с максимальным F1
         optimal_idx = np.argmax(f1_scores)
-        optimal_threshold = 0.3  # thresholds[optimal_idx]
+        optimal_threshold = thresholds[optimal_idx]
         predictions = (predictions[:, 1] > optimal_threshold).astype(int)
         f1 = f1_score(trg, predictions)
         r = recall_score(trg, predictions)
         p = precision_score(trg, predictions)
-        p = adjusted_precision(p, N_1, N_0, 1600, 8400)
+        p = adjusted_precision(p, N_1, N_0, pos_class, neg_class)
         ba = balanced_accuracy_score(trg, predictions)
 
         print(f"test on {len(trg)} samples: thrs = {optimal_threshold}, F1={f1:.2f}, Recall={r:.2f}, Precision={p:.2f}, ba={ba:.2f}")
@@ -458,90 +940,90 @@ def test(_model, _test_data):
         #plt.show()
     plt.clf()
 
+    def inference(__model, __dataset, __threshold):
+        print('Apply rowwise...')
+        # Create lists to store results
+        results = []
 
-    print('Apply rowwise...')
-    # results = []
-    # _dataset = _test_data[0]
-    # # Create lists to store results
-    # results = []
-    #
-    # # Create a new Excel workbook
-    # wb = Workbook()
-    # ws = wb.active
-    # ws.title = "Predictions"
-    #
-    # # Write headers - including columns for top SHAP features
-    # headers = ['Code', 'Termination Date', 'Prediction Probability', 'Prediction Class']
-    # shap_headers = [f'Top_{i + 1}_Feature' for i in range(5)] + [f'Top_{i + 1}_SHAP' for i in range(5)]
-    # all_headers = headers + shap_headers + ['SHAP Chart']
-    #
-    # for col_idx, header in enumerate(all_headers, 1):
-    #     ws.cell(row=1, column=col_idx, value=header)
-    #
-    # row_idx = 2  # Start from row 2
-    #
-    # for n, row in _dataset.iterrows():
-    #     if row['status'] == 0:
-    #         code = row['code']
-    #         if code not in pd.read_excel('himik_predictions.xlsx')['Code'].values:
-    #             continue
-    #         term_date = 11
-    #
-    #         # Create sample with the same features as batch processing
-    #         sample = _dataset.loc[_dataset['code'] == code]
-    #         feat = sample.drop(columns=['status', 'code'])
-    #
-    #         # Get prediction probability
-    #         pred_proba = _model.predict_proba(feat)[0, 1]
-    #
-    #         # Apply the same threshold as batch processing
-    #         prediction = 1 if pred_proba > optimal_threshold else 0
-    #
-    #         # Write basic data to Excel for ALL predictions
-    #         ws.cell(row=row_idx, column=1, value=code)
-    #         ws.cell(row=row_idx, column=2, value=term_date)
-    #         ws.cell(row=row_idx, column=3, value=pred_proba)
-    #         ws.cell(row=row_idx, column=4, value=prediction)
-    #
-    #         # Only create charts for predictions == 1
-    #         if prediction == 1:
-    #             # Get SHAP values
-    #             train_pool = Pool(data=feat, label=sample['status'])
-    #             shap_values = _model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
-    #
-    #             # Extract SHAP values (excluding base value)
-    #             shap_for_prediction = shap_values[0, :-1]
-    #             feature_names = feat.columns.tolist()
-    #
-    #             # Create SHAP bar chart and get top features
-    #             chart_buffer, top_features, top_shap_values = create_shap_barchart(feature_names, shap_for_prediction,
-    #                                                                                top_n=5)
-    #
-    #             # Write top SHAP features and values
-    #             for i, (feature, shap_val) in enumerate(zip(top_features, top_shap_values), 1):
-    #                 ws.cell(row=row_idx, column=4 + i, value=feature)  # Feature name
-    #                 ws.cell(row=row_idx, column=4 + 5 + i, value=shap_val)  # SHAP value
-    #
-    #             # Insert SHAP bar chart
-    #             img = Image(chart_buffer)
-    #             img.anchor = f'{openpyxl.utils.get_column_letter(4 + 10 + 1)}{row_idx}'  # Column after SHAP values
-    #             img.width = 300
-    #             img.height = 150
-    #             ws.add_image(img)
-    #         else:
-    #             # For negative predictions, you might want to add some placeholder or explanation
-    #             ws.cell(row=row_idx, column=5, value="No chart - prediction = 0")
-    #
-    #         row_idx += 1  # Always increment row index
-    #
-    # # Adjust column widths
-    # for col in range(1, 20):  # Adjust first 19 columns
-    #     ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 15
-    #
-    # # Save the workbook
-    # output_file = 'himik_prediction_detailed.xlsx'
-    # wb.save(output_file)
-    # print(f"Detailed predictions with SHAP charts saved to {output_file}")
+        # Create a new Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Predictions"
+
+        # Write headers - including columns for top SHAP features
+        headers = ['Code', 'Prediction Probability', 'Prediction Class']
+        shap_headers = [f'Top_{i + 1}_Feature' for i in range(5)] + [f'Top_{i + 1}_SHAP' for i in range(5)]
+        all_headers = headers + shap_headers + ['SHAP Chart']
+
+        for col_idx, header in enumerate(all_headers, 1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        row_idx = 2  # Start from row 2
+
+        for n, row in __dataset.iterrows():
+            if row['status'] == 0:
+                code = row['code']
+                # if code not in pd.read_excel('himik_predictions.xlsx')['Code'].values:
+                #     continue
+                term_date = 11
+
+                # Create sample with the same features as batch processing
+                sample = __dataset.loc[__dataset['code'] == code]
+                feat = sample.drop(columns=['status', 'code'])
+
+                # Get prediction probability
+                pred_proba = __model.predict_proba(feat)[0, 1]
+
+                # Apply the same threshold as batch processing
+                prediction = 1 if pred_proba > __threshold else 0
+
+                # Write basic data to Excel for ALL predictions
+                ws.cell(row=row_idx, column=1, value=code)
+                ws.cell(row=row_idx, column=2, value=pred_proba)
+                ws.cell(row=row_idx, column=3, value=prediction)
+
+                # Only create charts for predictions == 1
+                # if prediction == 1:
+                #     # Get SHAP values
+                #     train_pool = Pool(data=feat, label=sample['status'])
+                #     shap_values = __model.get_feature_importance(prettified=False, type='ShapValues', data=train_pool)
+                #
+                #     # Extract SHAP values (excluding base value)
+                #     shap_for_prediction = shap_values[0, :-1]
+                #     feature_names = feat.columns.tolist()
+                #
+                #     # Create SHAP bar chart and get top features
+                #     chart_buffer, top_features, top_shap_values = create_shap_barchart(feature_names, shap_for_prediction,
+                #                                                                        top_n=5)
+                #
+                #     # Write top SHAP features and values
+                #     for i, (feature, shap_val) in enumerate(zip(top_features, top_shap_values), 1):
+                #         ws.cell(row=row_idx, column=4 + i, value=feature)  # Feature name
+                #         ws.cell(row=row_idx, column=4 + 5 + i, value=shap_val)  # SHAP value
+                #
+                #     # Insert SHAP bar chart
+                #     img = Image(chart_buffer)
+                #     img.anchor = f'{openpyxl.utils.get_column_letter(4 + 10 + 1)}{row_idx}'  # Column after SHAP values
+                #     img.width = 300
+                #     img.height = 150
+                #     ws.add_image(img)
+                # else:
+                #     # For negative predictions, you might want to add some placeholder or explanation
+                #     ws.cell(row=row_idx, column=5, value="No chart - prediction = 0")
+
+                row_idx += 1  # Always increment row index
+
+        # Adjust column widths
+        for col in range(1, 20):  # Adjust first 19 columns
+            ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 15
+
+        # Save the workbook
+        output_file = 'himik_prediction_detailed_056.xlsx'
+        wb.save(output_file)
+        print(f"Detailed predictions with SHAP charts saved to {output_file}")
+
+    if _inference:
+        inference(_model, _test_data[0], 0.56)
 
     return f1_united, recall_united, precision_united
 
@@ -567,7 +1049,10 @@ def remove_outliers(dfs):
         'absenteeism_deriv',
         'absenteeism_shortterm',
         'income_deriv',
-        'income_shortterm'
+        'income_shortterm',
+        'total_seniority',
+        'seniority',
+        'salary_vs_city'
     ]
     new_datasets = []
     for df in dfs:
@@ -586,7 +1071,7 @@ def remove_outliers(dfs):
 
         # Step 3: Calculate Z-scores only on valid features
             z_scores = np.abs(stats.zscore(df[f]))
-            filtered_rows = (z_scores < 2).all(axis=1)
+            filtered_rows = (z_scores < 3).all(axis=1)
             df_clean = df[filtered_rows].copy().reset_index(drop=True)  # Reset index here
 
 
@@ -648,8 +1133,8 @@ def main(_config: dict):
     # debug end
 
 
-    datasets = collect_datasets(data_path, _config['remove_small_period'], _config['remove_invalid_deriv'])
-    test_datasets = collect_datasets(test_path, _config['remove_small_period'], _config['remove_invalid_deriv'])
+    datasets = collect_datasets(data_path, _config['remove_small_period'], _config['remove_invalid_deriv'], _config['additional_filtering'])
+    test_datasets = collect_datasets(test_path, _config['remove_small_period'], _config['remove_invalid_deriv'], _config['additional_filtering'])
     all_datasets = datasets + test_datasets
 
     # common = pd.concat(all_datasets)
@@ -668,6 +1153,7 @@ def main(_config: dict):
     else:
         trn_dataset = pd.concat(datasets)
         tst_dataset = pd.concat(test_datasets)
+
     print(len(tst_dataset[tst_dataset['status']==1]), ' 1s in TEST')
     datasets = [trn_dataset.reset_index(drop=True)]
     test_datasets = [tst_dataset.reset_index(drop=True)]
@@ -717,8 +1203,8 @@ def main(_config: dict):
         print(f"X train: {x_train.shape[0]}, x_val: {x_val.shape[0]}, y_train: {y_train.shape[0]}, y_val: {y_val.shape[0]}")
         sample_weight = calc_weights(y_train, y_val)
         merged = pd.merge(
-            x_train.reset_index(drop=True),
-            x_val.reset_index(drop=True),
+            x_train[['age',  'seniority', 'income_shortterm']].reset_index(drop=True),
+            x_val[['age',  'seniority', 'income_shortterm']].reset_index(drop=True),
             how='inner',
             indicator=False
         )
@@ -731,25 +1217,21 @@ def main(_config: dict):
 
         print(f"x_train shape after removing duplicates: {x_train.shape}")
         print(f"y_train shape after removing duplicates: {y_train.shape}")
+
+        x_train.to_csv('x_train.csv')
+        x_val.to_csv('x_val.csv')
+        y_train.to_csv('y_train.csv')
         # print(sample_weight)
-        trained_model = train(x_train.drop(columns='code', errors='ignore'), y_train, x_val.drop(columns='code', errors='ignore'), y_val, sample_weight, cat_feats_encoded, _config['model'], _config['num_iters'])
+        #trained_model = train(x_train.drop(columns='code', errors='ignore'), y_train, x_val.drop(columns='code', errors='ignore'), y_val, sample_weight, cat_feats_encoded, _config['model'], _config['num_iters'])
 
-        # with open('model_45_85_0441.pkl', 'rb') as file:
-        #     trained_model = pickle.load(file)
-        print('Run test on TRAIN set...')
-        f1, r, p = test(trained_model, d_train)
-        print('Run test on TEST set...')
-        f1, r, p = test(trained_model, d_test)
+        with open('model.pkl', 'rb') as file:
+           trained_model = pickle.load(file)
+        # print('\nRun test on TRAIN set...')
+        # test(trained_model, d_train, cat_feats_encoded)
+        print('\nRun test on TEST set...')
+        # f1, r, p = test(trained_model, d_val, cat_feats_encoded, False)
+        test_model(trained_model, x_train.drop(columns='code', errors='ignore'), y_train, d_val, cat_feats_encoded)
 
-        score[0] += f1
-        score[1] += r
-        score[2] += p
-
-        if _config['model'] == 'RandomForestClassifier':
-           show_decision_tree(trained_model)
-
-    score = (score[0] / len(rand_states), score[1] / len(rand_states), score[2] / len(rand_states))
-    print(f"Final score of cross-val: F1={score[0]:.2f}, Recall = {score[1]:.2f}, Precision={score[2]:.2f}")
 
     with open('model.pkl', 'wb') as f:
        print("Saving model..")
@@ -765,17 +1247,19 @@ if __name__ == '__main__':
         'remove_short_service': False,
         'remove_small_period': False,
         'remove_invalid_deriv': False,
-        'num_iters': 20,  # number of fitting attempts
-        'dataset_src': 'data/chemistry_trn_full_merged_add_short_service_rnd',
-        'test_src': 'data/chemistry_tst_full_merged_add_short_service_rnd',
+        'num_iters': 8,  # number of fitting attempts
+        'dataset_src': 'data/trn-4',  # 'data/chemistry_trn_full_merged_add_short_service_rnd',
+        'test_src': 'data/tst-4',  #  'data/chemistry_tst_full_merged_add_short_service_rnd',
         'encode_categorical': True,
-        'calculated_features': False,
+        'calculated_features': True,
         'use_selected_features': False,
-        'remove_outliers': False,
+        'remove_outliers': True,
         'make_synthetic': None,  # options: 'sdv', 'ydata', None
         'smote': False,  # perhaps not needed for catboost and in case if minority : majority > 0.5
         'random_split': False,
-        'cat_features': ['gender', 'season', 'month', 'year', 'citizenship', 'job_category', 'field', 'city', 'education', 'family_status']
+        'additional_filtering': True,
+        'remove_staff_reduction': True,
+        'cat_features': ['gender', 'season', 'month', 'citizenship', 'job_category_2', 'job_category', 'field',  'education', 'family_status']
     }
 
     main(config)
